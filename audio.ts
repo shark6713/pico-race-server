@@ -26,8 +26,13 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
-    if (user && !user.uid.startsWith("guest_")) {
+    if (user) {
         getUserProfile(user.uid).then(profile => {
+            // Şimdilik herkese test için 100,000 coin ekliyoruz!
+            if (profile.coins < 100000) {
+                profile.coins = 100000;
+                updateUserProfile(user.uid, { coins: 100000 });
+            }
             setUserProfile(profile);
         });
     }
@@ -54,8 +59,12 @@ export default function App() {
   const handleLogin = async () => {
     try {
       if (Capacitor.isNativePlatform()) {
-        // Firebase gerektirmeden sahte bir kullanıcı oluştur
-        const fakeId = "guest_" + Math.random().toString(36).substring(2, 9);
+        // Misafir kimliğini localStorage'da sakla ki paraları ve skinleri kaybolmasın
+        let fakeId = localStorage.getItem("picoGuestId");
+        if (!fakeId) {
+            fakeId = "guest_" + Math.random().toString(36).substring(2, 9);
+            localStorage.setItem("picoGuestId", fakeId);
+        }
         setUser({
           uid: fakeId,
           displayName: "Misafir",
@@ -67,6 +76,7 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
+      alert("Giriş yapılırken hata oluştu: " + (e as Error).message);
     }
   };
 
@@ -133,7 +143,7 @@ export default function App() {
     audioManager.resume();
     // Unlimited energy
     socket?.emit("findGame", { 
-        displayName: user.displayName || undefined,
+        displayName: user.displayName || "Misafir",
         skin: userProfile?.equippedSkin || undefined
     });
   };
@@ -235,7 +245,7 @@ export default function App() {
           }
           if (!prevMeRef.current.finished && me.finished) {
             audioManager.playWin();
-            if (me.currentPlacement && userProfile && !user?.uid.startsWith("guest_")) {
+            if (me.currentPlacement && userProfile) {
                 let coinsWon = 10;
                 if (me.currentPlacement === 1) coinsWon = 100;
                 else if (me.currentPlacement === 2) coinsWon = 50;
@@ -529,8 +539,9 @@ export default function App() {
       if (player.skin) {
          const skinItem = STORE_ITEMS.find(i => i.id === player.skin);
          if (skinItem) {
-             ctx.font = "20px sans-serif";
-             ctx.fillText(skinItem.emoji, player.x + player.width/2, player.y + yOffset + player.height/2 + 7);
+             ctx.font = "24px sans-serif";
+             ctx.textAlign = "center";
+             ctx.fillText(skinItem.emoji, player.x + player.width/2, player.y + yOffset - 30);
          }
       }
     });
@@ -581,7 +592,7 @@ export default function App() {
             {user && (
               <div className="flex items-center gap-2 pl-2 pr-1 py-1 bg-[#0F172A] border-2 border-slate-700 rounded-lg shadow-inner mr-2">
                 {user.photoURL && <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-md" referrerPolicy="no-referrer" />}
-                <span className="text-sm font-bold font-mono text-slate-300 truncate max-w-[100px] hidden sm:inline-block">{user.displayName?.split(' ')[0]}</span>
+                <span className="text-sm font-bold font-mono text-slate-300 truncate max-w-[100px] hidden sm:inline-block">{(user.displayName || 'Misafir').split(' ')[0]}</span>
                 <button title="Sign out" onClick={handleLogout} className="p-2 ml-1 hover:bg-slate-800 rounded-md transition-colors">
                   <LogOut className="w-4 h-4 text-red-400" />
                 </button>

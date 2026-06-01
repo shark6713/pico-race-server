@@ -10,6 +10,22 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export async function getUserProfile(uid: string): Promise<UserProfile> {
+  if (uid.startsWith("guest_")) {
+    const localData = localStorage.getItem("guestProfile_" + uid);
+    if (localData) {
+      return JSON.parse(localData);
+    } else {
+      const defaultProfile: UserProfile = {
+        uid,
+        coins: 0,
+        inventory: [],
+        equippedSkin: null
+      };
+      localStorage.setItem("guestProfile_" + uid, JSON.stringify(defaultProfile));
+      return defaultProfile;
+    }
+  }
+
   const docRef = doc(db, "users", uid);
   const docSnap = await getDoc(docRef);
   
@@ -28,6 +44,16 @@ export async function getUserProfile(uid: string): Promise<UserProfile> {
 }
 
 export async function updateUserProfile(uid: string, updates: Partial<UserProfile>) {
+  if (uid.startsWith("guest_")) {
+    const localData = localStorage.getItem("guestProfile_" + uid);
+    if (localData) {
+      const profile = JSON.parse(localData);
+      const newProfile = { ...profile, ...updates };
+      localStorage.setItem("guestProfile_" + uid, JSON.stringify(newProfile));
+    }
+    return;
+  }
+
   const docRef = doc(db, "users", uid);
   await updateDoc(docRef, updates);
 }
