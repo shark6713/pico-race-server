@@ -3,13 +3,15 @@ import { io, Socket } from "socket.io-client";
 import { GameState, PlayerInput } from "./shared/types";
 import { Trophy, RotateCcw, Zap, LogIn, LogOut } from "lucide-react";
 import { audioManager } from "./audio";
-import { auth, googleProvider } from "./firebase";
+import { auth, googleProvider, getUserProfile, updateUserProfile } from "./firebase";
+import { UserProfile, STORE_ITEMS } from "./shared/types";
 import { signInWithPopup, User, onAuthStateChanged, signOut, signInAnonymously } from "firebase/auth";
 import { Capacitor } from '@capacitor/core';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const prevMeRef = useRef<any>(null);
+  const localInputRef = useRef<PlayerInput>({ left: false, right: false, jump: false });
   const [socket, setSocket] = useState<Socket | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -19,7 +21,22 @@ export default function App() {
   
   const [onlineUsers, setOnlineUsers] = useState<any[]>([]);
   const [showLobby, setShowLobby] = useState(false);
+  const [showStore, setShowStore] = useState(false);
   const [invitation, setInvitation] = useState<{ from: any, roomId: string } | null>(null);
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+
+  useEffect(() => {
+    if (user) {
+        getUserProfile(user.uid).then(profile => {
+            // Şimdilik herkese test için 100,000 coin ekliyoruz!
+            if (profile.coins < 100000) {
+                profile.coins = 100000;
+                updateUserProfile(user.uid, { coins: 100000 });
+            }
+            setUserProfile(profile);
+        });
+    }
+  }, [user]);
 
   useEffect(() => {
     if (user && socket && isConnected) {
@@ -42,8 +59,12 @@ export default function App() {
   const handleLogin = async () => {
     try {
       if (Capacitor.isNativePlatform()) {
-        // Firebase gerektirmeden sahte bir kullanıcı oluştur
-        const fakeId = "guest_" + Math.random().toString(36).substring(2, 9);
+        // Misafir kimliğini localStorage'da sakla ki paraları ve skinleri kaybolmasın
+        let fakeId = localStorage.getItem("picoGuestId");
+        if (!fakeId) {
+            fakeId = "guest_" + Math.random().toString(36).substring(2, 9);
+            localStorage.setItem("picoGuestId", fakeId);
+        }
         setUser({
           uid: fakeId,
           displayName: "Misafir",
@@ -55,6 +76,7 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
+      alert("Giriş yapılırken hata oluştu: " + (e as Error).message);
     }
   };
 
@@ -120,7 +142,10 @@ export default function App() {
     audioManager.init();
     audioManager.resume();
     // Unlimited energy
-    socket?.emit("findGame", { displayName: user.displayName || undefined });
+    socket?.emit("findGame", { 
+        displayName: user.displayName || "Misafir",
+        skin: userProfile?.equippedSkin || undefined
+    });
   };
 
   const handleWatchAd = () => {
@@ -147,7 +172,10 @@ export default function App() {
     if (invitation) {
        audioManager.init();
        audioManager.resume();
-       socket?.emit("acceptInvite", invitation.roomId, { displayName: user?.displayName || undefined });
+       socket?.emit("acceptInvite", invitation.roomId, { 
+          displayName: user?.displayName || undefined,
+          skin: userProfile?.equippedSkin || undefined
+       });
        setInvitation(null);
     }
   };
@@ -217,6 +245,16 @@ export default function App() {
           }
           if (!prevMeRef.current.finished && me.finished) {
             audioManager.playWin();
+            if (me.currentPlacement && userProfile) {
+                let coinsWon = 10;
+                if (me.currentPlacement === 1) coinsWon = 100;
+                else if (me.currentPlacement === 2) coinsWon = 50;
+                else if (me.currentPlacement === 3) coinsWon = 20;
+                
+                const newCoins = userProfile.coins + coinsWon;
+                setUserProfile({ ...userProfile, coins: newCoins });
+                updateUserProfile(userProfile.uid, { coins: newCoins });
+            }
           }
         }
         prevMeRef.current = me || null;
@@ -232,20 +270,18 @@ export default function App() {
   useEffect(() => {
     if (!socket) return;
 
-    const input: PlayerInput = { left: false, right: false, jump: false };
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft" || e.key === "a") input.left = true;
-      if (e.key === "ArrowRight" || e.key === "d") input.right = true;
-      if (e.key === "ArrowUp" || e.key === "w" || e.key === " ") input.jump = true;
-      socket.emit("input", input);
+      if (e.key === "ArrowLeft" || e.key === "a") localInputRef.current.left = true;
+      if (e.key === "ArrowRight" || e.key === "d") localInputRef.current.right = true;
+      if (e.key === "ArrowUp" || e.key === "w" || e.key === " ") localInputRef.current.jump = true;
+      socket.emit("input", { ...localInputRef.current });
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft" || e.key === "a") input.left = false;
-      if (e.key === "ArrowRight" || e.key === "d") input.right = false;
-      if (e.key === "ArrowUp" || e.key === "w" || e.key === " ") input.jump = false;
-      socket.emit("input", input);
+      if (e.key === "ArrowLeft" || e.key === "a") localInputRef.current.left = false;
+      if (e.key === "ArrowRight" || e.key === "d") localInputRef.current.right = false;
+      if (e.key === "ArrowUp" || e.key === "w" || e.key === " ") localInputRef.current.jump = false;
+      socket.emit("input", { ...localInputRef.current });
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -498,6 +534,24 @@ export default function App() {
       }
 
       ctx.fillText(displayName, player.x + player.width / 2, player.y + yOffset - (player.id === myId ? 25 : 10));
+
+      // Draw Emoji Skin
+      if (player.skin) {
+         const skinItem = STORE_ITEMS.find(i => i.id === player.skin);
+         if (skinItem) {
+             ctx.font = "24px sans-serif";
+             ctx.textAlign = "center";
+             ctx.fillText(skinItem.emoji, player.x + player.width/2, player.y + yOffset - 30);
+         } else {
+             // Red box: player.skin exists but not found in STORE_ITEMS
+             ctx.fillStyle = "red";
+             ctx.fillRect(player.x + player.width/2 - 10, player.y + yOffset - 40, 20, 20);
+         }
+      } else {
+         // Yellow box: player.skin is completely falsy/undefined (Server not sending it)
+         ctx.fillStyle = "yellow";
+         ctx.fillRect(player.x + player.width/2 - 10, player.y + yOffset - 40, 20, 20);
+      }
     });
 
     ctx.restore();
@@ -505,16 +559,14 @@ export default function App() {
 
   const handleMobileInputStart = (type: keyof PlayerInput) => {
     if (!socket) return;
-    const currentInput = gameState?.players[myId]?.input || { left: false, right: false, jump: false };
-    const newInput = { ...currentInput, [type]: true };
-    socket.emit("input", newInput);
+    localInputRef.current[type] = true;
+    socket.emit("input", { ...localInputRef.current });
   };
   
   const handleMobileInputEnd = (type: keyof PlayerInput) => {
     if (!socket) return;
-    const currentInput = gameState?.players[myId]?.input || { left: false, right: false, jump: false };
-    const newInput = { ...currentInput, [type]: false };
-    socket.emit("input", newInput);
+    localInputRef.current[type] = false;
+    socket.emit("input", { ...localInputRef.current });
   };
 
   return (
@@ -548,7 +600,7 @@ export default function App() {
             {user && (
               <div className="flex items-center gap-2 pl-2 pr-1 py-1 bg-[#0F172A] border-2 border-slate-700 rounded-lg shadow-inner mr-2">
                 {user.photoURL && <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-md" referrerPolicy="no-referrer" />}
-                <span className="text-sm font-bold font-mono text-slate-300 truncate max-w-[100px] hidden sm:inline-block">{user.displayName?.split(' ')[0]}</span>
+                <span className="text-sm font-bold font-mono text-slate-300 truncate max-w-[100px] hidden sm:inline-block">{(user.displayName || 'Misafir').split(' ')[0]}</span>
                 <button title="Sign out" onClick={handleLogout} className="p-2 ml-1 hover:bg-slate-800 rounded-md transition-colors">
                   <LogOut className="w-4 h-4 text-red-400" />
                 </button>
@@ -564,23 +616,33 @@ export default function App() {
                )}
             </div>
             {user && (
-              <button
-                onClick={() => setShowLobby(!showLobby)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold uppercase tracking-wider transition-colors border-2 bg-blue-600 text-white shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] hover:bg-blue-500 active:translate-y-1 active:shadow-[0px_0px_0px_0px_rgba(0,0,0,0.3)] border-white/20"
-              >
-                <span>Lobby ({onlineUsers.length})</span>
-              </button>
+              <>
+                {userProfile && (
+                  <button
+                    onClick={() => setShowStore(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-yellow-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-yellow-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                  >
+                    <span>Store ({userProfile.coins} 🪙)</span>
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowLobby(!showLobby)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-blue-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-blue-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                >
+                  <span>Lobby ({onlineUsers.length})</span>
+                </button>
+              </>
             )}
             <button
               onClick={handleLeaveGame}
               disabled={!isInGame && !isSearching}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold uppercase tracking-wider transition-colors border-2 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-bold uppercase tracking-wider transition-colors border-2 ${
                   (isInGame || isSearching)
-                  ? 'bg-red-500 text-white shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] hover:bg-red-400 active:translate-y-1 active:shadow-[0px_0px_0px_0px_rgba(0,0,0,0.3)] border-white/20'
+                  ? 'bg-red-500 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-red-400 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20'
                   : 'bg-slate-700 text-slate-500 border-slate-600 cursor-not-allowed opacity-50'
               }`}
             >
-              <RotateCcw className="w-5 h-5" />
+              <RotateCcw className="w-4 h-4" />
               <span>Leave</span>
             </button>
           </div>
@@ -715,20 +777,24 @@ export default function App() {
           <div className="md:hidden mt-2 flex justify-between gap-2 select-none touch-none z-20 relative w-full mb-1 px-2">
               <div className="flex gap-2">
                   <button
-                      onPointerDown={(e) => { e.preventDefault(); handleMobileInputStart('left'); }}
-                      onPointerUp={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
-                      onPointerCancel={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
-                      onPointerLeave={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
+                      onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('left'); }}
+                      onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
+                      onTouchCancel={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
+                      onPointerDown={(e) => { handleMobileInputStart('left'); }}
+                      onPointerUp={(e) => { handleMobileInputEnd('left'); }}
+                      onPointerOut={(e) => { handleMobileInputEnd('left'); }}
                       onContextMenu={(e) => e.preventDefault()}
                       className="w-12 h-12 bg-[#1E293B] border-b-4 border-l-4 border-[#334155] rounded-xl flex items-center justify-center text-2xl font-black text-white active:bg-[#334155] active:border-b-2 active:border-l-2 active:translate-x-[2px] active:translate-y-[2px] shadow-lg touch-manipulation focus:outline-none"
                   >
                     ←
                   </button>
                   <button
-                      onPointerDown={(e) => { e.preventDefault(); handleMobileInputStart('right'); }}
-                      onPointerUp={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
-                      onPointerCancel={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
-                      onPointerLeave={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
+                      onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('right'); }}
+                      onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
+                      onTouchCancel={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
+                      onPointerDown={(e) => { handleMobileInputStart('right'); }}
+                      onPointerUp={(e) => { handleMobileInputEnd('right'); }}
+                      onPointerOut={(e) => { handleMobileInputEnd('right'); }}
                       onContextMenu={(e) => e.preventDefault()}
                       className="w-12 h-12 bg-[#1E293B] border-b-4 border-l-4 border-[#334155] rounded-xl flex items-center justify-center text-2xl font-black text-white active:bg-[#334155] active:border-b-2 active:border-l-2 active:translate-x-[2px] active:translate-y-[2px] shadow-lg touch-manipulation focus:outline-none"
                   >
@@ -736,10 +802,12 @@ export default function App() {
                   </button>
               </div>
               <button
-                  onPointerDown={(e) => { e.preventDefault(); handleMobileInputStart('jump'); }}
-                  onPointerUp={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
-                  onPointerCancel={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
-                  onPointerLeave={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
+                  onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('jump'); }}
+                  onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
+                  onTouchCancel={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
+                  onPointerDown={(e) => { handleMobileInputStart('jump'); }}
+                  onPointerUp={(e) => { handleMobileInputEnd('jump'); }}
+                  onPointerOut={(e) => { handleMobileInputEnd('jump'); }}
                   onContextMenu={(e) => e.preventDefault()}
                   className="w-20 h-12 bg-pink-500 border-b-4 border-r-4 border-pink-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-lg uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-manipulation focus:outline-none"
               >
@@ -812,6 +880,74 @@ export default function App() {
                <button onClick={handleDeclineInvite} className="flex-1 px-4 py-2 bg-slate-700 border-2 border-slate-600 rounded-lg font-bold text-white uppercase tracking-wider hover:bg-slate-600">Decline</button>
                <button onClick={handleAcceptInvite} className="flex-1 px-4 py-2 bg-yellow-500 border-2 border-yellow-700 rounded-lg font-bold text-slate-900 uppercase tracking-wider hover:bg-yellow-400 shadow-[2px_2px_0px_rgba(0,0,0,0.5)]">Accept</button>
             </div>
+        </div>
+      )}
+
+      {showStore && userProfile && (
+        <div className="absolute inset-0 bg-[#0F172A]/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#1E293B] p-6 md:p-8 rounded-3xl border-4 border-[#334155] shadow-2xl max-w-3xl w-full relative flex flex-col">
+             <button onClick={() => setShowStore(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white bg-slate-800 rounded-full w-8 h-8 flex items-center justify-center">✕</button>
+             
+             <div className="flex justify-between items-center mb-8 border-b-2 border-slate-700 pb-4">
+                 <h2 className="text-3xl font-black text-white uppercase tracking-widest flex items-center gap-3">
+                     Store 🛍️
+                 </h2>
+                 <div className="bg-slate-800 px-4 py-2 rounded-xl border-2 border-yellow-500/50 flex items-center gap-2 shadow-inner">
+                     <span className="text-yellow-400 font-bold text-xl font-mono">{userProfile.coins}</span>
+                     <span className="text-2xl">🪙</span>
+                 </div>
+             </div>
+
+             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 overflow-y-auto max-h-[60vh] p-2">
+                 {STORE_ITEMS.map(item => {
+                     const isOwned = userProfile.inventory.includes(item.id);
+                     const isEquipped = userProfile.equippedSkin === item.id;
+                     const canAfford = userProfile.coins >= item.price;
+                     
+                     return (
+                         <div key={item.id} className={`flex flex-col items-center p-4 rounded-2xl border-4 transition-transform ${isEquipped ? 'border-green-500 bg-green-500/10 scale-105 shadow-[0_0_15px_rgba(34,197,94,0.3)]' : isOwned ? 'border-blue-500 bg-blue-500/10' : 'border-slate-700 bg-slate-800 hover:scale-105'}`}>
+                             <div className="text-5xl mb-3 drop-shadow-lg">{item.emoji}</div>
+                             <div className="font-bold text-white uppercase tracking-wider mb-2 text-center text-sm">{item.name}</div>
+                             
+                             {isEquipped ? (
+                                 <button onClick={() => {
+                                     setUserProfile({...userProfile, equippedSkin: null});
+                                     updateUserProfile(userProfile.uid, { equippedSkin: null });
+                                 }} className="w-full mt-auto py-2 bg-red-500 hover:bg-red-400 rounded-lg font-bold text-white uppercase text-xs">Unequip</button>
+                             ) : isOwned ? (
+                                 <button onClick={() => {
+                                     setUserProfile({...userProfile, equippedSkin: item.id});
+                                     updateUserProfile(userProfile.uid, { equippedSkin: item.id });
+                                 }} className="w-full mt-auto py-2 bg-green-500 hover:bg-green-400 rounded-lg font-bold text-white uppercase text-xs">Equip</button>
+                             ) : (
+                                 <button 
+                                    onClick={() => {
+                                        if (canAfford) {
+                                            const newProfile = {
+                                                ...userProfile,
+                                                coins: userProfile.coins - item.price,
+                                                inventory: [...userProfile.inventory, item.id],
+                                                equippedSkin: item.id
+                                            };
+                                            setUserProfile(newProfile);
+                                            updateUserProfile(userProfile.uid, {
+                                                coins: newProfile.coins,
+                                                inventory: newProfile.inventory,
+                                                equippedSkin: newProfile.equippedSkin
+                                            });
+                                        }
+                                    }}
+                                    disabled={!canAfford}
+                                    className={`w-full mt-auto py-2 rounded-lg font-bold uppercase text-xs flex items-center justify-center gap-1 ${canAfford ? 'bg-yellow-500 text-slate-900 hover:bg-yellow-400' : 'bg-slate-700 text-slate-500 cursor-not-allowed'}`}
+                                 >
+                                     {item.price} 🪙
+                                 </button>
+                             )}
+                         </div>
+                     )
+                 })}
+             </div>
+          </div>
         </div>
       )}
 

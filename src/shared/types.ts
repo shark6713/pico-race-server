@@ -23,6 +23,7 @@ export interface Player {
   finished: boolean;
   isBot?: boolean;
   displayName?: string;
+  skin?: string;
   placements: number[];
   currentPlacement: number | null;
 }
@@ -60,13 +61,35 @@ export interface OnlineUser {
   status: 'idle' | 'searching' | 'playing';
 }
 
+export interface StoreItem {
+  id: string;
+  name: string;
+  emoji: string;
+  price: number;
+}
+
+export const STORE_ITEMS: StoreItem[] = [
+  { id: "skin_cowboy", name: "Cowboy", emoji: "🤠", price: 500 },
+  { id: "skin_devil", name: "Devil", emoji: "😈", price: 1000 },
+  { id: "skin_robot", name: "Robot", emoji: "🤖", price: 1500 },
+  { id: "skin_alien", name: "Alien", emoji: "👽", price: 2000 },
+  { id: "skin_king", name: "King", emoji: "👑", price: 5000 }
+];
+
+export interface UserProfile {
+  uid: string;
+  coins: number;
+  inventory: string[];
+  equippedSkin: string | null;
+}
+
 export interface ClientEvents {
   auth: (user: { uid: string; displayName: string; email: string; photoURL?: string }) => void;
-  findGame: (data?: { displayName?: string }) => void;
+  findGame: (data?: { displayName?: string; skin?: string }) => void;
   input: (input: PlayerInput) => void;
   leaveGame: () => void;
   inviteUser: (targetSocketId: string) => void;
-  acceptInvite: (roomId: string, data?: { displayName?: string }) => void;
+  acceptInvite: (roomId: string, data?: { displayName?: string; skin?: string }) => void;
   declineInvite: (targetSocketId: string) => void;
 }
 
