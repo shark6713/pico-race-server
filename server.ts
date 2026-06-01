@@ -164,10 +164,14 @@ setInterval(() => {
         // Bot logic
         if (player.isBot) {
            player.input.right = true;
+           player.input.left = false;
            
            let jumpRequested = false;
+
            if (player.isGrounded) {
-               const lookAheadX = player.x + player.width + 15;
+               // Look ahead scales with speed for perfect timing
+               const lookAheadDist = 10 + Math.abs(player.vx) * 2;
+               const lookAheadX = player.x + player.width + lookAheadDist;
                const feetY = player.y + player.height;
                
                let floorFound = false;
@@ -175,19 +179,26 @@ setInterval(() => {
                
                for (const block of room.blocks) {
                    if (lookAheadX >= block.x && lookAheadX <= block.x + block.width) {
-                       // Check for floor
+                       // Check for floor (allows dropping into shallow pits without jumping if safe)
                        if (block.y >= feetY - 5 && block.y <= feetY + 120) {
                            floorFound = true;
                        }
-                       // Check for wall
-                       if (block.y < player.y + player.height - 10 && block.y + block.height > player.y + 10) {
+                       // Check for solid wall blocking path
+                       if (block.y < player.y + player.height - 15 && block.y + block.height > player.y + 10) {
                            wallAhead = true;
                        }
                    }
                }
                
-               if (!floorFound || wallAhead || player.vx === 0 || Math.random() < 0.01) {
+               // Jump if there's a wall, no floor (pit), or if we are totally stuck
+               if (!floorFound || wallAhead || (player.vx === 0 && Math.random() < 0.5)) {
                    jumpRequested = true;
+               }
+           } else {
+               // Mid-air recovery: if stuck against a wall while falling, briefly back up to unstuck
+               if (player.vx === 0 && player.vy > 0 && Math.random() < 0.1) {
+                   player.input.right = false;
+                   player.input.left = true;
                }
            }
            

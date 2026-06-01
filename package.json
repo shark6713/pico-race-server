@@ -1,42 +1,79 @@
-{
-  "name": "react-example",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "tsx server.ts",
-    "build": "vite build && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
-    "preview": "vite preview",
-    "start": "node dist/server.cjs",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@capacitor/android": "^8.3.4",
-    "@capacitor/core": "^8.3.4",
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vitejs/plugin-react": "^5.0.4",
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
-    "firebase": "^12.14.0",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3",
-    "vite": "^6.2.3"
-  },
-  "devDependencies": {
-    "@capacitor/cli": "^8.3.4",
-    "@types/express": "^4.17.21",
-    "@types/node": "^22.14.0",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3"
-  }
+export interface Vector {
+  x: number;
+  y: number;
+}
+
+export interface PlayerInput {
+  left: boolean;
+  right: boolean;
+  jump: boolean;
+}
+
+export interface Player {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  width: number;
+  height: number;
+  color: string;
+  isGrounded: boolean;
+  input: PlayerInput;
+  finished: boolean;
+  isBot?: boolean;
+  displayName?: string;
+  placements: number[];
+  currentPlacement: number | null;
+}
+
+export interface Block {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface GameState {
+  id: string;
+  players: Record<string, Player>;
+  blocks: Block[];
+  finishLine: { x: number, y: number, width: number, height: number };
+  mapWidth: number;
+  mapHeight: number;
+  currentLevel: number;
+  raceCount: number;
+  totalRaces: number;
+  finishCounter: number;
+  countdown: number | null;
+  status: 'waiting' | 'playing' | 'finished';
+  waitTimer: number | null;
+  bgTheme: string;
+}
+
+export interface OnlineUser {
+  socketId: string;
+  uid: string;
+  displayName: string;
+  email: string;
+  photoURL?: string;
+  status: 'idle' | 'searching' | 'playing';
+}
+
+export interface ClientEvents {
+  auth: (user: { uid: string; displayName: string; email: string; photoURL?: string }) => void;
+  findGame: (data?: { displayName?: string }) => void;
+  input: (input: PlayerInput) => void;
+  leaveGame: () => void;
+  inviteUser: (targetSocketId: string) => void;
+  acceptInvite: (roomId: string, data?: { displayName?: string }) => void;
+  declineInvite: (targetSocketId: string) => void;
+}
+
+export interface ServerEvents {
+  stateUpdate: (state: GameState) => void;
+  searching: () => void;
+  onlineUsers: (users: OnlineUser[]) => void;
+  inviteReceived: (from: OnlineUser, roomId: string) => void;
+  inviteDeclined: (by: string) => void;
 }

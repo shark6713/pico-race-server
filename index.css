@@ -10,6 +10,7 @@ import { Capacitor } from '@capacitor/core';
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const prevMeRef = useRef<any>(null);
+  const localInputRef = useRef<PlayerInput>({ left: false, right: false, jump: false });
   const [socket, setSocket] = useState<Socket | null>(null);
   const [gameState, setGameState] = useState<GameState | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -232,20 +233,18 @@ export default function App() {
   useEffect(() => {
     if (!socket) return;
 
-    const input: PlayerInput = { left: false, right: false, jump: false };
-
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft" || e.key === "a") input.left = true;
-      if (e.key === "ArrowRight" || e.key === "d") input.right = true;
-      if (e.key === "ArrowUp" || e.key === "w" || e.key === " ") input.jump = true;
-      socket.emit("input", input);
+      if (e.key === "ArrowLeft" || e.key === "a") localInputRef.current.left = true;
+      if (e.key === "ArrowRight" || e.key === "d") localInputRef.current.right = true;
+      if (e.key === "ArrowUp" || e.key === "w" || e.key === " ") localInputRef.current.jump = true;
+      socket.emit("input", { ...localInputRef.current });
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === "ArrowLeft" || e.key === "a") input.left = false;
-      if (e.key === "ArrowRight" || e.key === "d") input.right = false;
-      if (e.key === "ArrowUp" || e.key === "w" || e.key === " ") input.jump = false;
-      socket.emit("input", input);
+      if (e.key === "ArrowLeft" || e.key === "a") localInputRef.current.left = false;
+      if (e.key === "ArrowRight" || e.key === "d") localInputRef.current.right = false;
+      if (e.key === "ArrowUp" || e.key === "w" || e.key === " ") localInputRef.current.jump = false;
+      socket.emit("input", { ...localInputRef.current });
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -505,16 +504,14 @@ export default function App() {
 
   const handleMobileInputStart = (type: keyof PlayerInput) => {
     if (!socket) return;
-    const currentInput = gameState?.players[myId]?.input || { left: false, right: false, jump: false };
-    const newInput = { ...currentInput, [type]: true };
-    socket.emit("input", newInput);
+    localInputRef.current[type] = true;
+    socket.emit("input", { ...localInputRef.current });
   };
   
   const handleMobileInputEnd = (type: keyof PlayerInput) => {
     if (!socket) return;
-    const currentInput = gameState?.players[myId]?.input || { left: false, right: false, jump: false };
-    const newInput = { ...currentInput, [type]: false };
-    socket.emit("input", newInput);
+    localInputRef.current[type] = false;
+    socket.emit("input", { ...localInputRef.current });
   };
 
   return (
@@ -566,7 +563,7 @@ export default function App() {
             {user && (
               <button
                 onClick={() => setShowLobby(!showLobby)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold uppercase tracking-wider transition-colors border-2 bg-blue-600 text-white shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] hover:bg-blue-500 active:translate-y-1 active:shadow-[0px_0px_0px_0px_rgba(0,0,0,0.3)] border-white/20"
+                className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-blue-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-blue-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
               >
                 <span>Lobby ({onlineUsers.length})</span>
               </button>
@@ -574,13 +571,13 @@ export default function App() {
             <button
               onClick={handleLeaveGame}
               disabled={!isInGame && !isSearching}
-              className={`flex items-center gap-2 px-5 py-2.5 rounded-lg font-bold uppercase tracking-wider transition-colors border-2 ${
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-bold uppercase tracking-wider transition-colors border-2 ${
                   (isInGame || isSearching)
-                  ? 'bg-red-500 text-white shadow-[4px_4px_0px_0px_rgba(0,0,0,0.3)] hover:bg-red-400 active:translate-y-1 active:shadow-[0px_0px_0px_0px_rgba(0,0,0,0.3)] border-white/20'
+                  ? 'bg-red-500 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-red-400 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20'
                   : 'bg-slate-700 text-slate-500 border-slate-600 cursor-not-allowed opacity-50'
               }`}
             >
-              <RotateCcw className="w-5 h-5" />
+              <RotateCcw className="w-4 h-4" />
               <span>Leave</span>
             </button>
           </div>
@@ -715,20 +712,24 @@ export default function App() {
           <div className="md:hidden mt-2 flex justify-between gap-2 select-none touch-none z-20 relative w-full mb-1 px-2">
               <div className="flex gap-2">
                   <button
-                      onPointerDown={(e) => { e.preventDefault(); handleMobileInputStart('left'); }}
-                      onPointerUp={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
-                      onPointerCancel={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
-                      onPointerLeave={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
+                      onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('left'); }}
+                      onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
+                      onTouchCancel={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
+                      onPointerDown={(e) => { handleMobileInputStart('left'); }}
+                      onPointerUp={(e) => { handleMobileInputEnd('left'); }}
+                      onPointerOut={(e) => { handleMobileInputEnd('left'); }}
                       onContextMenu={(e) => e.preventDefault()}
                       className="w-12 h-12 bg-[#1E293B] border-b-4 border-l-4 border-[#334155] rounded-xl flex items-center justify-center text-2xl font-black text-white active:bg-[#334155] active:border-b-2 active:border-l-2 active:translate-x-[2px] active:translate-y-[2px] shadow-lg touch-manipulation focus:outline-none"
                   >
                     ←
                   </button>
                   <button
-                      onPointerDown={(e) => { e.preventDefault(); handleMobileInputStart('right'); }}
-                      onPointerUp={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
-                      onPointerCancel={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
-                      onPointerLeave={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
+                      onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('right'); }}
+                      onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
+                      onTouchCancel={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
+                      onPointerDown={(e) => { handleMobileInputStart('right'); }}
+                      onPointerUp={(e) => { handleMobileInputEnd('right'); }}
+                      onPointerOut={(e) => { handleMobileInputEnd('right'); }}
                       onContextMenu={(e) => e.preventDefault()}
                       className="w-12 h-12 bg-[#1E293B] border-b-4 border-l-4 border-[#334155] rounded-xl flex items-center justify-center text-2xl font-black text-white active:bg-[#334155] active:border-b-2 active:border-l-2 active:translate-x-[2px] active:translate-y-[2px] shadow-lg touch-manipulation focus:outline-none"
                   >
@@ -736,10 +737,12 @@ export default function App() {
                   </button>
               </div>
               <button
-                  onPointerDown={(e) => { e.preventDefault(); handleMobileInputStart('jump'); }}
-                  onPointerUp={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
-                  onPointerCancel={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
-                  onPointerLeave={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
+                  onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('jump'); }}
+                  onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
+                  onTouchCancel={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
+                  onPointerDown={(e) => { handleMobileInputStart('jump'); }}
+                  onPointerUp={(e) => { handleMobileInputEnd('jump'); }}
+                  onPointerOut={(e) => { handleMobileInputEnd('jump'); }}
                   onContextMenu={(e) => e.preventDefault()}
                   className="w-20 h-12 bg-pink-500 border-b-4 border-r-4 border-pink-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-lg uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-manipulation focus:outline-none"
               >
