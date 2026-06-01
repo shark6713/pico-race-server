@@ -109,6 +109,54 @@ function checkCollision(r1: {x: number, y: number, width: number, height: number
   );
 }
 
+// Predictive AI Simulation
+function predictOutcome(player: Player, room: GameState, jumpRequested: boolean): number {
+    let { x, y, vx, vy, isGrounded } = player;
+    
+    for (let frame = 0; frame < 45; frame++) {
+        vx = MOVE_SPEED; // Bots always try to move right
+        
+        if (frame === 0 && jumpRequested && isGrounded) {
+            vy = JUMP_FORCE;
+            isGrounded = false;
+        }
+        
+        vy += GRAVITY;
+        x += vx;
+        
+        for (const block of room.blocks) {
+            if (checkCollision({ x, y, width: player.width, height: player.height }, block)) {
+                if (vx > 0) x = block.x - player.width;
+                else if (vx < 0) x = block.x + block.width;
+                vx = 0;
+            }
+        }
+        
+        if (x < 0) { x = 0; vx = 0; }
+        if (x + player.width > room.mapWidth) { x = room.mapWidth - player.width; vx = 0; }
+        
+        y += vy;
+        isGrounded = false;
+        
+        for (const block of room.blocks) {
+            if (checkCollision({ x, y, width: player.width, height: player.height }, block)) {
+                if (vy > 0) {
+                    y = block.y - player.height;
+                    isGrounded = true;
+                } else if (vy < 0) {
+                    y = block.y + block.height;
+                }
+                vy = 0;
+            }
+        }
+        
+        if (y > room.mapHeight + 100) return -9999; // Death penalty
+        if (vx === 0) return x - 500; // Stuck penalty
+    }
+    
+    return x;
+}
+
 // Game Loop
 setInterval(() => {
   for (const roomId in rooms) {
@@ -169,29 +217,16 @@ setInterval(() => {
            let jumpRequested = false;
 
            if (player.isGrounded) {
-               // Look ahead scales with speed for perfect timing
-               const lookAheadDist = 10 + Math.abs(player.vx) * 2;
-               const lookAheadX = player.x + player.width + lookAheadDist;
-               const feetY = player.y + player.height;
+               // PREDICTIVE AI: Simulate both futures
+               const scoreNoJump = predictOutcome(player, room, false);
+               const scoreJump = predictOutcome(player, room, true);
                
-               let floorFound = false;
-               let wallAhead = false;
-               
-               for (const block of room.blocks) {
-                   if (lookAheadX >= block.x && lookAheadX <= block.x + block.width) {
-                       // Check for floor (allows dropping into shallow pits without jumping if safe)
-                       if (block.y >= feetY - 5 && block.y <= feetY + 120) {
-                           floorFound = true;
-                       }
-                       // Check for solid wall blocking path
-                       if (block.y < player.y + player.height - 15 && block.y + block.height > player.y + 10) {
-                           wallAhead = true;
-                       }
-                   }
-               }
-               
-               // Jump if there's a wall, no floor (pit), or if we are totally stuck
-               if (!floorFound || wallAhead || (player.vx === 0 && Math.random() < 0.5)) {
+               // If jumping results in a significantly better outcome, jump!
+               // (Random factor added so bots aren't 100% flawless robots)
+               if (scoreJump > scoreNoJump + 5 && Math.random() < 0.95) {
+                   jumpRequested = true;
+               } else if (scoreNoJump === -9999 && scoreJump > -9999) {
+                   // Always jump if not jumping means certain death
                    jumpRequested = true;
                }
            } else {
