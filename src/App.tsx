@@ -286,6 +286,12 @@ export default function App() {
 
   const handleJoinGame = () => {
     if (!user) return; // Need login
+    
+    if (!isConnected || !socket?.connected) {
+        setAppAlert("Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.");
+        return;
+    }
+
     audioManager.init();
     audioManager.resume();
     
@@ -298,6 +304,8 @@ export default function App() {
       setLocalEnergy(newEnergy);
       updateUserProfile(user.uid, { energy: newEnergy }).catch(e => console.log("Guest profile not saved:", e));
     }
+    
+    setIsSearching(true);
     
     socket?.emit("findGame", { 
         displayName: userProfile?.displayName || user?.displayName || "Misafir", 
@@ -344,10 +352,14 @@ export default function App() {
            });
        } finally {
            setIsWatchingAd(false);
-           loadAd();
        }
     } else {
-       setAppAlert("Reklam henüz yüklenmedi, lütfen birazdan tekrar deneyin.");
+       setAppAlert("Reklam henüz yüklenmedi (Emülatör) ama test için +25 Enerji verildi!");
+       setLocalEnergy(e => {
+           const newE = Math.min(100, e + 25);
+           if (user) updateUserProfile(user.uid, { energy: newE, lastEnergyUpdateTime: lastTickRef.current }).catch(err => console.log(err));
+           return newE;
+       });
     }
   };
 
@@ -392,7 +404,6 @@ export default function App() {
     // Connect to the socket server using env var if available (for Android/Capacitor)
     const serverUrl = import.meta.env.VITE_SERVER_URL || `${protocol}//${host}`;
     const newSocket = io(serverUrl, {
-      transports: ["websocket"],
       reconnectionAttempts: 5,
       extraHeaders: {
         "Bypass-Tunnel-Reminder": "true"
@@ -767,7 +778,13 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0F172A] relative flex flex-col items-center p-4 lg:p-8 font-sans text-white overflow-hidden">
+    <div 
+      className="min-h-screen bg-[#0F172A] relative flex flex-col items-center p-4 lg:p-8 font-sans text-white overflow-hidden"
+      style={{
+        paddingTop: 'calc(1rem + env(safe-area-inset-top))',
+        paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))'
+      }}
+    >
       {appAlert && (
         <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-[#1E293B] p-6 rounded-2xl border-4 border-red-500 shadow-2xl max-w-sm w-full flex flex-col items-center text-center animate-bounce-short">
@@ -790,128 +807,118 @@ export default function App() {
       
       <div className="max-w-5xl w-full relative z-10 flex flex-col h-full">
         {/* Header */}
-        <div className="w-full bg-[#1E293B] border-t-4 border-b-4 border-[#334155] rounded-t-xl flex flex-col sm:flex-row items-center justify-between p-4 px-6 mb-0 z-20 shadow-md">
-          <div className="mb-4 sm:mb-0">
-            <h1 className="text-2xl sm:text-3xl font-bold tracking-wider uppercase text-white flex items-center gap-3">
-              <Trophy className="w-8 h-8 text-pink-500 drop-shadow-[0_0_10px_rgba(236,72,153,0.5)]" />
-              Pico Race {gameState?.raceCount ? `- Race ${gameState.raceCount} / ${gameState.totalRaces}` : ''}
+        <div className="w-full bg-[#1E293B] border-t-4 border-b-4 border-[#334155] rounded-t-xl flex flex-col items-center justify-between p-3 sm:p-4 px-4 sm:px-6 mb-0 z-20 shadow-md gap-3">
+          <div className="w-full flex items-center justify-between">
+            <h1 className="text-xl sm:text-3xl font-bold tracking-wider uppercase text-white flex items-center gap-2 sm:gap-3">
+              <Trophy className="w-6 h-6 sm:w-8 sm:h-8 text-pink-500 drop-shadow-[0_0_10px_rgba(236,72,153,0.5)]" />
+              Pico Race <span className="hidden sm:inline">{gameState?.raceCount ? `- Race ${gameState.raceCount} / ${gameState.totalRaces}` : ''}</span>
             </h1>
-            <p className="text-xs sm:text-sm text-slate-400 font-mono font-bold uppercase tracking-wider mt-2">
+            <div className="flex items-center gap-3 text-xs sm:text-sm font-mono text-slate-400">
               {isConnected ? (
-                <span className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-green-400 border border-white animate-pulse"></span>
-                  Connected • {gameState ? Object.keys(gameState.players).length : 0} Players Online
-                </span>
+                <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-green-500 rounded-full shadow-[0_0_8px_rgba(34,197,94,0.8)] animate-pulse"></div> <span className="hidden sm:inline">CONNECTED</span></span>
               ) : (
-                <span className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-red-400 border border-white"></span>
-                  Connecting...
-                </span>
+                <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-red-500 rounded-full shadow-[0_0_8px_rgba(239,68,68,0.8)]"></div> <span className="hidden sm:inline">OFFLINE</span></span>
               )}
-            </p>
+              <span className="hidden sm:inline">•</span>
+              <span>{onlineUsers.length} <span className="hidden sm:inline">PLAYERS ONLINE</span></span>
+            </div>
           </div>
+          
           <div className="flex flex-row flex-wrap justify-center items-center gap-2">
-            {user && (
-              <div className="flex items-center gap-1.5 px-2 py-1 bg-[#0F172A] border-2 border-slate-700 rounded-lg shadow-inner">
-                {user.photoURL && <img src={user.photoURL} alt="avatar" className="w-6 h-6 rounded-md" referrerPolicy="no-referrer" />}
-                {isEditingName ? (
-                   <input
-                       type="text"
-                       value={newNameInput}
-                       onChange={(e) => setNewNameInput(e.target.value)}
-                       onBlur={handleSaveName}
-                       onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); }}
-                       className="bg-[#1E293B] text-xs font-mono font-bold text-white px-1.5 py-0.5 rounded outline-none w-20"
-                       autoFocus
-                   />
-                ) : (
-                   <div className="flex items-center gap-1 group">
-                       <span className="text-xs font-bold font-mono text-slate-300 truncate max-w-[80px] inline-block flex items-center gap-1">
-                          {userProfile?.isAdmin && <span className="text-yellow-400">👑</span>}
-                          {(userProfile?.displayName || user.displayName || 'Misafir').split(' ')[0]}
-                       </span>
-                       <button onClick={() => { setNewNameInput(userProfile?.displayName || user.displayName || 'Misafir'); setIsEditingName(true); }} className="p-0.5 hover:text-white text-slate-400">
-                           <Edit2 className="w-3.5 h-3.5" />
-                       </button>
-                   </div>
-                )}
-                <button title="Sign out" onClick={handleLogout} className="p-1.5 hover:bg-slate-800 rounded-md transition-colors">
-                  <LogOut className="w-3.5 h-3.5 text-red-400" />
-                </button>
-              </div>
-            )}
+            {/* User Profile - Compact on Mobile */}
+            {user ? (
+               <div className="flex items-center gap-2 bg-[#0F172A] px-3 py-1.5 rounded-lg border-2 border-slate-700 shadow-inner">
+                 {user.photoURL && <img src={user.photoURL} alt="avatar" className="w-6 h-6 rounded-md" referrerPolicy="no-referrer" />}
+                 {isEditingName ? (
+                    <input
+                        type="text"
+                        value={newNameInput}
+                        onChange={(e) => setNewNameInput(e.target.value)}
+                        onBlur={handleSaveName}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); }}
+                        className="bg-[#1E293B] text-xs font-mono font-bold text-white px-1.5 py-0.5 rounded outline-none w-20"
+                        autoFocus
+                    />
+                 ) : (
+                    <div className="flex items-center gap-1 group">
+                        <span className="text-xs font-bold font-mono text-slate-300 truncate max-w-[80px] inline-block">
+                           {(userProfile?.displayName || user.displayName || 'Misafir').split(' ')[0]}
+                        </span>
+                        <button onClick={() => { setNewNameInput(userProfile?.displayName || user.displayName || 'Misafir'); setIsEditingName(true); }} className="p-0.5 hover:text-white text-slate-400">
+                            <Edit2 className="w-3 h-3" />
+                        </button>
+                    </div>
+                 )}
+                 <button title="Sign out" onClick={handleLogout} className="p-0.5 hover:bg-slate-800 rounded-md transition-colors">
+                   <LogOut className="w-3 h-3 text-red-400" />
+                 </button>
+               </div>
+            ) : null}
+
             <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0F172A] border-2 border-slate-700 rounded-lg shadow-inner">
                <Zap className="w-4 h-4 text-yellow-500 fill-yellow-500" />
                <span className="text-sm font-bold text-yellow-500 font-mono tracking-widest">{localEnergy}/100 E</span>
                {timeUntilNext !== null && (
-                 <span className="text-xs text-slate-400 font-mono ml-2 border-l-2 border-slate-700 pl-2">
+                 <span className="text-xs text-slate-400 font-mono ml-2 border-l-2 border-slate-700 pl-2 hidden sm:block">
                    {String(Math.floor(timeUntilNext / 60)).padStart(2, '0')}:{String(timeUntilNext % 60).padStart(2, '0')}
                  </span>
                )}
-               {localEnergy < 10 && (
-                 <button 
-                   onClick={handleWatchAd}
-                   disabled={isWatchingAd}
-                   className="ml-2 bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded font-bold uppercase transition-colors"
-                 >
-                   {isWatchingAd ? "İzleniyor..." : "+25 Enerji"}
-                 </button>
-               )}
             </div>
+
             {user && (
-              <>
+              <div className="flex flex-wrap items-center justify-center gap-1.5 w-full sm:w-auto mt-1 sm:mt-0">
                 {userProfile && (
                   <>
                     {userProfile.isAdmin && (
                       <button
                         onClick={() => { setShowAdminPanel(true); fetchAllUsers(); }}
-                        className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-red-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-red-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                        className="flex items-center gap-1 px-2 py-1.5 text-[10px] sm:text-xs rounded border bg-red-600 text-white hover:bg-red-500 font-bold uppercase tracking-wider transition-colors border-white/20"
                       >
-                        <ShieldAlert className="w-3.5 h-3.5" />
+                        <ShieldAlert className="w-3 h-3" />
                         <span className="hidden sm:inline-block">Admin</span>
                       </button>
                     )}
                     <button
                       onClick={() => { setShowLeaderboard(true); fetchLeaderboard(); }}
-                      className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-purple-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-purple-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                      className="flex items-center gap-1 px-2 py-1.5 text-[10px] sm:text-xs rounded border bg-purple-600 text-white hover:bg-purple-500 font-bold uppercase tracking-wider transition-colors border-white/20"
                     >
-                      <ListOrdered className="w-3.5 h-3.5" />
+                      <ListOrdered className="w-3 h-3" />
                       <span className="hidden sm:inline-block">Top 50</span>
                     </button>
                     <button
                       onClick={() => { audioManager.toggleMute(); setAudioRender(r => r + 1); }}
-                      className="flex items-center justify-center p-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-slate-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-slate-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                      className="flex items-center justify-center p-1.5 text-[10px] sm:text-xs rounded border bg-slate-600 text-white hover:bg-slate-500 font-bold uppercase tracking-wider transition-colors border-white/20"
                     >
-                      {audioManager.isMuted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5" />}
+                      {audioManager.isMuted ? <VolumeX className="w-3 h-3 text-red-400" /> : <Volume2 className="w-3 h-3" />}
                     </button>
                     <button
                       onClick={() => setShowStore(true)}
-                      className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-yellow-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-yellow-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                      className="flex items-center gap-1 px-2 py-1.5 text-[10px] sm:text-xs rounded border bg-yellow-600 text-white hover:bg-yellow-500 font-bold uppercase tracking-wider transition-colors border-white/20"
                     >
-                      <span>Store ({userProfile.coins} 🪙)</span>
+                      <span>Store ({userProfile.coins} ??)</span>
                     </button>
                   </>
                 )}
                 <button
                   onClick={() => setShowLobby(!showLobby)}
-                  className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-blue-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-blue-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                  className="flex items-center gap-1 px-2 py-1.5 text-[10px] sm:text-xs rounded border bg-blue-600 text-white hover:bg-blue-500 font-bold uppercase tracking-wider transition-colors border-white/20"
                 >
                   <span>Lobby ({onlineUsers.length})</span>
                 </button>
-              </>
+                <button
+                  onClick={handleLeaveGame}
+                  disabled={!isInGame && !isSearching}
+                  className={`flex items-center gap-1 px-2 py-1.5 text-[10px] sm:text-xs rounded border font-bold uppercase tracking-wider transition-colors ${
+                      (isInGame || isSearching)
+                      ? 'bg-red-500 text-white hover:bg-red-400 border-white/20'
+                      : 'bg-slate-700 text-slate-500 border-slate-600 cursor-not-allowed opacity-50'
+                  }`}
+                >
+                  <RotateCcw className="w-3 h-3" />
+                  <span>Leave</span>
+                </button>
+              </div>
             )}
-            <button
-              onClick={handleLeaveGame}
-              disabled={!isInGame && !isSearching}
-              className={`flex items-center gap-1 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 ${
-                  (isInGame || isSearching)
-                  ? 'bg-red-500 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-red-400 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20'
-                  : 'bg-slate-700 text-slate-500 border-slate-600 cursor-not-allowed opacity-50'
-              }`}
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Leave</span>
-            </button>
           </div>
         </div>
 
@@ -956,15 +963,15 @@ export default function App() {
             </div>
           )}
           {gameState && gameState.status === 'waiting' && gameState.countdown === null && (
-            <div className="absolute top-0 left-0 w-full h-full bg-[#0F172A]/90 backdrop-blur-sm z-30 flex items-center justify-center">
-              <div className="bg-[#1E293B] p-8 rounded-2xl border-2 border-[#334155] shadow-2xl flex flex-col items-center">
-                 <div className="w-16 h-16 border-4 border-yellow-500 border-t-transparent rounded-full animate-spin mb-6"></div>
-                 <h2 className="text-2xl font-black text-white uppercase tracking-widest mb-2">Waiting for Players</h2>
-                 <p className="text-xl font-mono text-yellow-400 font-bold mb-4">{Object.keys(gameState.players).length} / 4 Players</p>
-                 {gameState.waitTimer !== null && (
-                   <p className="text-sm font-mono text-slate-400">Bots will fill in {Math.ceil(gameState.waitTimer / 60)}s</p>
-                 )}
-              </div>
+            <div className="absolute top-24 left-1/2 -translate-x-1/2 bg-[#1E293B]/90 backdrop-blur-md px-6 py-4 rounded-full border-2 border-yellow-500/50 shadow-[0_0_15px_rgba(234,179,8,0.3)] z-30 flex items-center gap-4 animate-bounce-short">
+                 <div className="w-6 h-6 border-4 border-yellow-500 border-t-transparent rounded-full animate-spin"></div>
+                 <div className="flex flex-col">
+                   <h2 className="text-sm font-black text-white uppercase tracking-widest leading-none">Waiting for Players</h2>
+                   <p className="text-xs font-mono text-yellow-400 font-bold mt-1">
+                     {Object.keys(gameState.players).length} / 4 Players
+                     {gameState.waitTimer !== null && ` • Bots in ${Math.ceil(gameState.waitTimer / 60)}s`}
+                   </p>
+                 </div>
             </div>
           )}
           {!isInGame && (

@@ -49,7 +49,7 @@ function createRoom(): GameState {
     finishCounter: 1,
     countdown: null,
     status: 'waiting',
-    waitTimer: 30 * 60,
+    waitTimer: 312,
     bgTheme: LEVELS[currentLevelIndex].bgTheme,
   };
   
