@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { GameState, PlayerInput } from "./shared/types";
-import { Trophy, RotateCcw, Zap, LogIn, LogOut } from "lucide-react";
+import { Trophy, RotateCcw, Zap, LogIn, LogOut, Edit2, Volume2, VolumeX, ListOrdered, ShieldAlert } from "lucide-react";
 import { audioManager } from "./audio";
-import { auth, googleProvider, getUserProfile, updateUserProfile } from "./firebase";
+import { auth, googleProvider, getUserProfile, updateUserProfile, addFriendByCode, db } from "./firebase";
+import { doc, onSnapshot, collection, query, orderBy, limit, getDocs, updateDoc, increment } from "firebase/firestore";
 import { UserProfile, STORE_ITEMS } from "./shared/types";
-import { signInWithPopup, User, onAuthStateChanged, signOut, signInAnonymously } from "firebase/auth";
+import { signInWithPopup, User, onAuthStateChanged, signOut, signInAnonymously, signInWithCredential, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
 import { Capacitor } from '@capacitor/core';
+import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
+import { AdMob, RewardAdOptions, AdLoadInfo, RewardAdPluginEvents } from '@capacitor-community/admob';
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -24,30 +27,56 @@ export default function App() {
   const [showStore, setShowStore] = useState(false);
   const [invitation, setInvitation] = useState<{ from: any, roomId: string } | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [friendCodeInput, setFriendCodeInput] = useState("");
+  const [friendMessage, setFriendMessage] = useState("");
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [newNameInput, setNewNameInput] = useState("");
 
   useEffect(() => {
+    let unsubscribe: (() => void) | undefined;
     if (user) {
         getUserProfile(user.uid).then(profile => {
-            // Şimdilik herkese test için 100,000 coin ekliyoruz!
-            if (profile.coins < 100000) {
-                profile.coins = 100000;
-                updateUserProfile(user.uid, { coins: 100000 });
-            }
             setUserProfile(profile);
+
+            unsubscribe = onSnapshot(doc(db, "users", user.uid), (docSnap) => {
+               if (docSnap.exists()) {
+                  // Keep local modifications intact if any, but replace with real data
+                  setUserProfile(docSnap.data() as UserProfile);
+               }
+            }, (error) => {
+               console.error("onSnapshot error:", error);
+            });
         });
     }
+    return () => {
+       if (unsubscribe) unsubscribe();
+    };
   }, [user]);
 
   useEffect(() => {
-    if (user && socket && isConnected) {
-       socket.emit("auth", {
-          uid: user.uid,
-          displayName: user.displayName,
-          email: user.email,
-          photoURL: user.photoURL
-       });
-    }
-  }, [user, socket, isConnected]);
+    if (!socket || !user) return;
+    socket.emit("auth", {
+        uid: user.uid,
+        displayName: userProfile?.displayName || user.displayName || "Misafir",
+        photoURL: user.photoURL
+    });
+  }, [socket, user, userProfile?.displayName]);
+
+  // Global audio init on first interaction
+  useEffect(() => {
+    const initAudio = () => {
+      audioManager.init();
+      audioManager.resume();
+      window.removeEventListener("pointerdown", initAudio);
+      window.removeEventListener("keydown", initAudio);
+    };
+    window.addEventListener("pointerdown", initAudio);
+    window.addEventListener("keydown", initAudio);
+    return () => {
+      window.removeEventListener("pointerdown", initAudio);
+      window.removeEventListener("keydown", initAudio);
+    };
+  }, []);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, u => {
@@ -56,23 +85,31 @@ export default function App() {
     return unsub;
   }, []);
 
+  const handleGuestLogin = () => {
+    let fakeId = localStorage.getItem("picoGuestId");
+    if (!fakeId) {
+        fakeId = "guest_" + Math.random().toString(36).substring(2, 9);
+        localStorage.setItem("picoGuestId", fakeId);
+    }
+    setUser({
+      uid: fakeId,
+      displayName: "Misafir",
+      email: null,
+      photoURL: null
+    } as any);
+  };
+
   const handleLogin = async () => {
     try {
       if (Capacitor.isNativePlatform()) {
-        // Misafir kimliğini localStorage'da sakla ki paraları ve skinleri kaybolmasın
-        let fakeId = localStorage.getItem("picoGuestId");
-        if (!fakeId) {
-            fakeId = "guest_" + Math.random().toString(36).substring(2, 9);
-            localStorage.setItem("picoGuestId", fakeId);
-        }
-        setUser({
-          uid: fakeId,
-          displayName: "Misafir",
-          email: null,
-          photoURL: null
-        } as any);
+          const result = await FirebaseAuthentication.signInWithGoogle({ skipNativeAuth: true });
+          if (!result.credential?.idToken) {
+              throw new Error("Google Sign-In failed or cancelled.");
+          }
+          const credential = GoogleAuthProvider.credential(result.credential.idToken);
+          await signInWithCredential(auth, credential);
       } else {
-        await signInWithPopup(auth, googleProvider);
+          await signInWithPopup(auth, googleProvider);
       }
     } catch (e) {
       console.error(e);
@@ -80,59 +117,168 @@ export default function App() {
     }
   };
 
+  const handleAppleLogin = async () => {
+    try {
+      if (Capacitor.isNativePlatform()) {
+          const result = await FirebaseAuthentication.signInWithApple({ skipNativeAuth: true });
+          
+          if (!result.credential?.idToken) {
+              throw new Error("Apple Sign-In failed or cancelled.");
+          }
+          
+          const provider = new OAuthProvider('apple.com');
+          const credential = provider.credential({
+              idToken: result.credential.idToken,
+              rawNonce: result.credential.nonce
+          });
+          
+          await signInWithCredential(auth, credential);
+      } else {
+          const provider = new OAuthProvider('apple.com');
+          await signInWithPopup(auth, provider);
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Apple Girişi yapılırken hata oluştu: " + (e as Error).message);
+    }
+  };
+
   const handleLogout = async () => {
     await signOut(auth);
+    setUser(null);
+  };
+
+  const handleSaveName = async () => {
+     if (!user) return;
+     const newName = newNameInput.trim();
+     if (newName) {
+         await updateUserProfile(user.uid, { displayName: newName });
+         setUserProfile(prev => prev ? { ...prev, displayName: newName } : null);
+     }
+     setIsEditingName(false);
   };
 
 
-  const [energy, setEnergy] = useState<number>(() => {
-    const saved = localStorage.getItem("picoEnergy");
-    return saved !== null ? parseInt(saved, 10) : 30;
-  });
-
-  const lastTickRef = useRef<number>((() => {
-    const saved = localStorage.getItem("picoEnergyTime");
-    return saved !== null ? parseInt(saved, 10) : Date.now();
-  })());
-
+  const [localEnergy, setLocalEnergy] = useState<number>(100);
+  const lastTickRef = useRef<number>(Date.now());
   const [timeUntilNext, setTimeUntilNext] = useState<number | null>(null);
 
-  const [adWatchesLeft, setAdWatchesLeft] = useState<number>(() => {
-    const saved = localStorage.getItem("picoAdWatches");
-    return saved !== null ? parseInt(saved, 10) : 2;
-  });
-
+  const [isAdLoaded, setIsAdLoaded] = useState(false);
   const [isWatchingAd, setIsWatchingAd] = useState(false);
+  
+  const [showLeaderboard, setShowLeaderboard] = useState(false);
+  const [topPlayers, setTopPlayers] = useState<UserProfile[]>([]);
+  
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [adminLoading, setAdminLoading] = useState(false);
+  const [audioRender, setAudioRender] = useState(0);
+
+  const fetchAllUsers = async () => {
+    try {
+      setAdminLoading(true);
+      const q = query(collection(db, "users"), orderBy("coins", "desc"));
+      const snapshot = await getDocs(q);
+      const players = snapshot.docs.map(doc => doc.data() as UserProfile);
+      setAllUsers(players);
+    } catch (e) {
+      console.error("Admin fetch error:", e);
+    } finally {
+      setAdminLoading(false);
+    }
+  };
+
+  const handleSendCoins = async (targetUid: string, amount: number) => {
+    if (!userProfile?.isAdmin) return;
+    try {
+      await updateDoc(doc(db, "users", targetUid), {
+        coins: increment(amount)
+      });
+      // Update local state to reflect UI instantly
+      setAllUsers(prev => prev.map(p => p.uid === targetUid ? { ...p, coins: (p.coins || 0) + amount } : p));
+      alert(`${amount} Coin başarıyla gönderildi!`);
+    } catch (e) {
+      console.error("Coin send error:", e);
+      alert("Hata: Coin gönderilemedi. Lütfen kuralları güncellediğinizden emin olun.");
+    }
+  };
+
+  const fetchLeaderboard = async () => {
+    try {
+      const q = query(collection(db, "users"), orderBy("coins", "desc"), limit(60));
+      const snapshot = await getDocs(q);
+      const players = snapshot.docs.map(doc => doc.data() as UserProfile);
+      setTopPlayers(players.filter(p => !p.isAdmin && p.displayName && p.displayName.trim() !== "").slice(0, 50));
+    } catch (e) {
+      console.error("Leaderboard fetch error:", e);
+    }
+  };
 
   useEffect(() => {
-    localStorage.setItem("picoEnergy", energy.toString());
-    localStorage.setItem("picoEnergyTime", lastTickRef.current.toString());
-    localStorage.setItem("picoAdWatches", adWatchesLeft.toString());
-  }, [energy, adWatchesLeft]);
+    if (userProfile && userProfile.energy !== undefined) {
+       setLocalEnergy(userProfile.energy);
+       lastTickRef.current = userProfile.lastEnergyUpdateTime || Date.now();
+    }
+  }, [userProfile?.energy, userProfile?.lastEnergyUpdateTime]);
 
   useEffect(() => {
+    if (!user) return;
     const interval = setInterval(() => {
-      if (energy >= 30) {
-         lastTickRef.current = Date.now();
+      if (localEnergy >= 100) {
          setTimeUntilNext(null);
          return;
       }
       
       const now = Date.now();
       const diff = now - lastTickRef.current;
-      const minutes30 = 30 * 60 * 1000; // 30 minutes in ms
+      const minutes5 = 5 * 60 * 1000;
       
-      if (diff >= minutes30) {
-          const ticks = Math.floor(diff / minutes30);
-          lastTickRef.current = now - (diff % minutes30);
-          localStorage.setItem("picoEnergyTime", lastTickRef.current.toString());
-          setEnergy(e => Math.min(30, e + ticks));
+      if (diff >= minutes5) {
+          const ticks = Math.floor(diff / minutes5);
+          const newEnergy = Math.min(100, localEnergy + (ticks * 1));
+          const newLastTick = now - (diff % minutes5);
+          
+          setLocalEnergy(newEnergy);
+          lastTickRef.current = newLastTick;
+          
+          updateUserProfile(user.uid, { 
+             energy: newEnergy, 
+             lastEnergyUpdateTime: newLastTick 
+          });
       } else {
-          setTimeUntilNext(Math.ceil((minutes30 - diff) / 1000));
+          setTimeUntilNext(Math.ceil((minutes5 - diff) / 1000));
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [energy]);
+  }, [localEnergy, user]);
+
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return;
+    const initAdMob = async () => {
+        try {
+          await AdMob.initialize({});
+          AdMob.addListener(RewardAdPluginEvents.Loaded, () => setIsAdLoaded(true));
+          AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
+             setIsWatchingAd(false);
+             loadAd();
+          });
+          AdMob.addListener(RewardAdPluginEvents.FailedToLoad, () => {
+             setIsAdLoaded(false);
+             setTimeout(loadAd, 30000);
+          });
+          loadAd();
+        } catch(e) { console.error(e); }
+    };
+    const loadAd = async () => {
+       const platform = Capacitor.getPlatform();
+       let adId = "ca-app-pub-5681334667848041/3250836094"; // Default Android
+       if (platform === 'ios') {
+           adId = "ca-app-pub-5681334667848041/7280060533"; // iOS
+       }
+       await AdMob.prepareRewardVideoAd({ adId, isTesting: false }).catch(e => console.error(e));
+    };
+    initAdMob();
+  }, []);
 
 
   const isInGame = gameState?.players[myId] !== undefined;
@@ -141,21 +287,64 @@ export default function App() {
     if (!user) return; // Need login
     audioManager.init();
     audioManager.resume();
-    // Unlimited energy
-    socket?.emit("findGame", { 
-        displayName: user.displayName || "Misafir",
-        skin: userProfile?.equippedSkin || undefined
+    
+    if (!socket?.connected) {
+        alert("Sunucuya bağlanılamadı, lütfen birkaç saniye bekleyip tekrar deneyin.");
+        return;
+    }
+    
+    if (!userProfile?.isAdmin) {
+      if (localEnergy < 10) {
+          alert("Yeterli enerjiniz yok! Biraz bekleyin veya reklam izleyin.");
+          return;
+      }
+      const newEnergy = localEnergy - 10;
+      setLocalEnergy(newEnergy);
+      updateUserProfile(user.uid, { energy: newEnergy }).catch(e => console.log("Guest profile not saved:", e));
+    }
+    
+    socket.emit("findGame", { 
+        displayName: userProfile?.displayName || user?.displayName || "Misafir", 
+        skin: userProfile?.equippedSkin || undefined 
     });
   };
 
-  const handleWatchAd = () => {
-    if (adWatchesLeft > 0) {
-        setIsWatchingAd(true);
-        setTimeout(() => {
-            setIsWatchingAd(false);
-            setEnergy(e => Math.min(30, e + 15));
-            setAdWatchesLeft(a => a - 1);
-        }, 3000); // simulate 3 sec ad
+  const handleWatchAd = async () => {
+    if (!Capacitor.isNativePlatform()) {
+       setIsWatchingAd(true);
+       setTimeout(() => {
+          setIsWatchingAd(false);
+          const newEnergy = Math.min(100, localEnergy + 25);
+          setLocalEnergy(newEnergy);
+          if (user) updateUserProfile(user.uid, { energy: newEnergy, lastEnergyUpdateTime: lastTickRef.current });
+       }, 3000);
+       return;
+    }
+
+    if (isAdLoaded) {
+       setIsWatchingAd(true);
+       try {
+           // 15 saniyelik zaman aşımı (AdMob donmalarını önlemek için)
+           const reward = await Promise.race([
+               AdMob.showRewardVideoAd(),
+               new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Reklam yüklenmesi zaman aşımına uğradı.")), 15000))
+           ]);
+           if (reward) {
+               setLocalEnergy(e => {
+                   const newE = Math.min(100, e + 25);
+                   if (user) updateUserProfile(user.uid, { energy: newE, lastEnergyUpdateTime: lastTickRef.current }).catch(err => console.log(err));
+                   return newE;
+               });
+           }
+       } catch (e) {
+           console.error("AdMob Error:", e);
+           alert("Reklam gösterilirken bir hata oluştu veya zaman aşımına uğradı.");
+       } finally {
+           setIsWatchingAd(false);
+           loadAd();
+       }
+    } else {
+       alert("Reklam henüz yüklenmedi, lütfen birazdan tekrar deneyin.");
     }
   };
 
@@ -169,15 +358,20 @@ export default function App() {
   };
 
   const handleAcceptInvite = () => {
-    if (invitation) {
-       audioManager.init();
-       audioManager.resume();
-       socket?.emit("acceptInvite", invitation.roomId, { 
-          displayName: user?.displayName || undefined,
+      if (invitation && socket) {
+         if (!userProfile?.isAdmin) {
+           if (localEnergy < 10) return;
+           const newEnergy = localEnergy - 10;
+           setLocalEnergy(newEnergy);
+           updateUserProfile(user.uid, { energy: newEnergy });
+         }
+
+        socket.emit("acceptInvite", invitation.roomId, {
+          displayName: userProfile?.displayName || user?.displayName || undefined,
           skin: userProfile?.equippedSkin || undefined
-       });
-       setInvitation(null);
-    }
+        });
+        setInvitation(null);
+     }
   };
 
   const handleDeclineInvite = () => {
@@ -596,38 +790,91 @@ export default function App() {
               )}
             </p>
           </div>
-          <div className="flex flex-col sm:flex-row items-center gap-4">
+          <div className="flex flex-row flex-wrap justify-center items-center gap-2">
             {user && (
-              <div className="flex items-center gap-2 pl-2 pr-1 py-1 bg-[#0F172A] border-2 border-slate-700 rounded-lg shadow-inner mr-2">
-                {user.photoURL && <img src={user.photoURL} alt="avatar" className="w-8 h-8 rounded-md" referrerPolicy="no-referrer" />}
-                <span className="text-sm font-bold font-mono text-slate-300 truncate max-w-[100px] hidden sm:inline-block">{(user.displayName || 'Misafir').split(' ')[0]}</span>
-                <button title="Sign out" onClick={handleLogout} className="p-2 ml-1 hover:bg-slate-800 rounded-md transition-colors">
-                  <LogOut className="w-4 h-4 text-red-400" />
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-[#0F172A] border-2 border-slate-700 rounded-lg shadow-inner">
+                {user.photoURL && <img src={user.photoURL} alt="avatar" className="w-6 h-6 rounded-md" referrerPolicy="no-referrer" />}
+                {isEditingName ? (
+                   <input
+                       type="text"
+                       value={newNameInput}
+                       onChange={(e) => setNewNameInput(e.target.value)}
+                       onBlur={handleSaveName}
+                       onKeyDown={(e) => { if (e.key === 'Enter') handleSaveName(); }}
+                       className="bg-[#1E293B] text-xs font-mono font-bold text-white px-1.5 py-0.5 rounded outline-none w-20"
+                       autoFocus
+                   />
+                ) : (
+                   <div className="flex items-center gap-1 group">
+                       <span className="text-xs font-bold font-mono text-slate-300 truncate max-w-[80px] inline-block flex items-center gap-1">
+                          {userProfile?.isAdmin && <span className="text-yellow-400">👑</span>}
+                          {(userProfile?.displayName || user.displayName || 'Misafir').split(' ')[0]}
+                       </span>
+                       <button onClick={() => { setNewNameInput(userProfile?.displayName || user.displayName || 'Misafir'); setIsEditingName(true); }} className="p-0.5 hover:text-white text-slate-400">
+                           <Edit2 className="w-3.5 h-3.5" />
+                       </button>
+                   </div>
+                )}
+                <button title="Sign out" onClick={handleLogout} className="p-1.5 hover:bg-slate-800 rounded-md transition-colors">
+                  <LogOut className="w-3.5 h-3.5 text-red-400" />
                 </button>
               </div>
             )}
-            <div className="flex items-center gap-2 px-4 py-2.5 bg-[#0F172A] border-2 border-slate-700 rounded-lg shadow-inner">
-               <Zap className="w-5 h-5 text-yellow-500 fill-yellow-500" />
-               <span className="font-bold text-yellow-500 font-mono tracking-widest">∞ E</span>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0F172A] border-2 border-slate-700 rounded-lg shadow-inner">
+               <Zap className="w-4 h-4 text-yellow-500 fill-yellow-500" />
+               <span className="text-sm font-bold text-yellow-500 font-mono tracking-widest">{localEnergy}/100 E</span>
                {timeUntilNext !== null && (
                  <span className="text-xs text-slate-400 font-mono ml-2 border-l-2 border-slate-700 pl-2">
                    {String(Math.floor(timeUntilNext / 60)).padStart(2, '0')}:{String(timeUntilNext % 60).padStart(2, '0')}
                  </span>
                )}
+               {localEnergy < 10 && (
+                 <button 
+                   onClick={handleWatchAd}
+                   disabled={isWatchingAd}
+                   className="ml-2 bg-green-600 hover:bg-green-500 text-white text-xs px-2 py-1 rounded font-bold uppercase transition-colors"
+                 >
+                   {isWatchingAd ? "İzleniyor..." : "+25 Enerji"}
+                 </button>
+               )}
             </div>
             {user && (
               <>
                 {userProfile && (
-                  <button
-                    onClick={() => setShowStore(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-yellow-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-yellow-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
-                  >
-                    <span>Store ({userProfile.coins} 🪙)</span>
-                  </button>
+                  <>
+                    {userProfile.isAdmin && (
+                      <button
+                        onClick={() => { setShowAdminPanel(true); fetchAllUsers(); }}
+                        className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-red-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-red-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                      >
+                        <ShieldAlert className="w-3.5 h-3.5" />
+                        <span className="hidden sm:inline-block">Admin</span>
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setShowLeaderboard(true); fetchLeaderboard(); }}
+                      className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-purple-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-purple-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                    >
+                      <ListOrdered className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline-block">Top 50</span>
+                    </button>
+                    <button
+                      onClick={() => { audioManager.toggleMute(); setAudioRender(r => r + 1); }}
+                      className="flex items-center justify-center p-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-slate-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-slate-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                    >
+                      {audioManager.isMuted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5" />}
+                    </button>
+                    <button
+                      onClick={() => setShowStore(true)}
+                      className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-yellow-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-yellow-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                    >
+                      <span>Store ({userProfile.coins} 🪙)</span>
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => setShowLobby(!showLobby)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-blue-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-blue-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
+                  className="flex items-center gap-1.5 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 bg-blue-600 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-blue-500 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20"
                 >
                   <span>Lobby ({onlineUsers.length})</span>
                 </button>
@@ -636,13 +883,13 @@ export default function App() {
             <button
               onClick={handleLeaveGame}
               disabled={!isInGame && !isSearching}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md font-bold uppercase tracking-wider transition-colors border-2 ${
+              className={`flex items-center gap-1 px-2 py-1.5 text-xs rounded-md font-bold uppercase tracking-wider transition-colors border-2 ${
                   (isInGame || isSearching)
                   ? 'bg-red-500 text-white shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] hover:bg-red-400 active:translate-y-[2px] active:translate-x-[2px] active:shadow-none border-white/20'
                   : 'bg-slate-700 text-slate-500 border-slate-600 cursor-not-allowed opacity-50'
               }`}
             >
-              <RotateCcw className="w-4 h-4" />
+              <RotateCcw className="w-3.5 h-3.5" />
               <span>Leave</span>
             </button>
           </div>
@@ -656,12 +903,12 @@ export default function App() {
             </div>
           )}
           {gameState && gameState.status === 'finished' && (
-            <div className="absolute top-0 left-0 w-full h-full bg-[#0F172A]/90 backdrop-blur-md z-40 flex items-center justify-center p-4">
-              <div className="bg-[#1E293B] p-8 rounded-2xl border-4 border-yellow-500 shadow-[0_0_50px_rgba(234,179,8,0.3)] max-w-lg w-full">
-                <h2 className="text-3xl font-black text-white text-center mb-6 uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-600">
+            <div className="fixed inset-0 w-full h-full bg-[#0F172A]/95 backdrop-blur-xl z-[100] flex items-center justify-center p-4 sm:p-8">
+              <div className="bg-[#1E293B] p-8 sm:p-12 rounded-3xl border-8 border-yellow-500 shadow-[0_0_100px_rgba(234,179,8,0.5)] max-w-4xl w-full max-h-full overflow-y-auto">
+                <h2 className="text-4xl sm:text-6xl font-black text-white text-center mb-8 sm:mb-12 uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-600 drop-shadow-2xl">
                   Tournament Results
                 </h2>
-                <div className="space-y-4">
+                <div className="space-y-6">
                   {Object.values(gameState.players)
                     .map((p: any) => {
                        const sum = p.placements.reduce((a:number,b:number)=>a+b, 0);
@@ -670,18 +917,18 @@ export default function App() {
                     })
                     .sort((a,b) => a.avgNum - b.avgNum)
                     .map((p, index) => (
-                      <div key={p.id} className={`flex justify-between items-center p-4 rounded-xl bg-[#0F172A] border-2 ${index===0 ? 'border-yellow-400' : 'border-slate-700'}`}>
-                         <span className="text-white font-bold flex items-center gap-3 font-mono text-lg">
-                           {index === 0 && <Trophy className="w-6 h-6 text-yellow-400" />}
+                      <div key={p.id} className={`flex justify-between items-center p-6 rounded-2xl bg-[#0F172A] border-4 ${index===0 ? 'border-yellow-400 shadow-[0_0_20px_rgba(234,179,8,0.4)]' : 'border-slate-700'}`}>
+                         <span className="text-white font-bold flex items-center gap-4 font-mono text-2xl sm:text-3xl">
+                           {index === 0 && <Trophy className="w-10 h-10 text-yellow-400 drop-shadow-[0_0_10px_rgba(234,179,8,1)]" />}
                            {index + 1}. {p.displayName || "Player"}
                          </span>
-                         <span className="text-yellow-400 font-mono font-bold text-xl">Avg: {p.avgStr}</span>
+                         <span className="text-yellow-400 font-mono font-bold text-2xl sm:text-3xl">Avg: {p.avgStr}</span>
                       </div>
                   ))}
                 </div>
                 <button 
                   onClick={() => window.location.reload()}
-                  className="w-full mt-8 bg-pink-600 hover:bg-pink-500 text-white font-black text-lg py-4 rounded-xl uppercase tracking-widest border-b-4 border-pink-800 active:border-b-0 active:translate-y-1 transition-all"
+                  className="w-full mt-12 bg-pink-600 hover:bg-pink-500 text-white font-black text-2xl sm:text-4xl py-6 rounded-2xl uppercase tracking-widest border-b-8 border-pink-800 active:border-b-0 active:translate-y-2 transition-all shadow-2xl"
                 >
                   Play Again
                 </button>
@@ -719,13 +966,29 @@ export default function App() {
                     <p className="text-slate-400 font-mono text-sm text-center mb-8 relative z-10">Dodge obstacles, reach the green zone first. Costs energy to enter.</p>
                     
                     {!user ? (
-                      <button 
-                        onClick={handleLogin}
-                        className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl font-bold uppercase tracking-wider text-lg transition-all relative z-10 bg-white text-slate-800 border-b-4 border-r-4 border-slate-400 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:bg-gray-100 active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
-                      >
-                        <LogIn className="w-6 h-6 text-[#0F172A]" />
-                        <span>{Capacitor.isNativePlatform() ? "Misafir Olarak Oyna" : "Sign In with Google"}</span>
-                      </button>
+                      <div className="w-full flex flex-col gap-3 relative z-10">
+                        <button 
+                          onClick={handleLogin}
+                          className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl font-bold uppercase tracking-wider text-base sm:text-lg transition-all bg-white text-slate-800 border-b-4 border-r-4 border-slate-400 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:bg-gray-100 active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                        >
+                          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6" alt="Google" />
+                          <span>Google ile Giriş</span>
+                        </button>
+                        <button 
+                          onClick={handleAppleLogin}
+                          className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl font-bold uppercase tracking-wider text-base sm:text-lg transition-all bg-black text-white border-b-4 border-r-4 border-gray-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:bg-gray-900 active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                        >
+                          <svg viewBox="0 0 384 512" className="w-6 h-6 fill-white"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.1-44.6-35.9-2.8-74.3 22.7-93.1 22.7-18.9 0-46.5-22.7-76.3-22.7-44.8 0-87.1 27.5-111.4 69.8-51.2 88.5-13.3 221.7 34.6 291 23.3 33.6 51 69.8 87.5 68.3 35.1-1.5 48.7-22.7 91.1-22.7 42.4 0 54.9 22.7 91.7 22.1 38.3-.6 62.4-33.1 84.8-67.6 26.2-39.7 37-78.1 37.6-80.1-1-1-72.2-27.1-72.4-111.3zM250.7 77.2c20.4-24.8 34.1-59.5 30.4-94.2-30.8 1.2-66.8 20.6-88.3 45.4-17.7 20.3-33.8 55.7-29.2 89.8 34.1 2.6 66.8-16.1 87.1-41z"/></svg>
+                          <span>Apple ile Giriş</span>
+                        </button>
+                        <button 
+                          onClick={handleGuestLogin}
+                          className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl font-bold uppercase tracking-wider text-base sm:text-lg transition-all bg-[#334155] text-white border-b-4 border-r-4 border-[#0F172A] shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:bg-[#475569] active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                        >
+                          <LogIn className="w-6 h-6 text-white" />
+                          <span>Misafir Olarak Devam Et</span>
+                        </button>
+                      </div>
                     ) : (
                       <>
                         <button 
@@ -735,7 +998,7 @@ export default function App() {
                           <Zap className="w-6 h-6 fill-[#0F172A]" />
                           <span>Join Game</span>
                         </button>
-                        {energy < 30 && adWatchesLeft > 0 && (
+                        {localEnergy < 100 && (
                           <button 
                             onClick={handleWatchAd}
                             disabled={isWatchingAd}
@@ -748,7 +1011,7 @@ export default function App() {
                             ) : (
                               <Zap className="w-4 h-4 text-yellow-500" />
                             )}
-                            {isWatchingAd ? "Watching Ad..." : `Watch Ad (+15 E) - ${adWatchesLeft} left`}
+                            {isWatchingAd ? "Reklam İzleniyor..." : `Reklam İzle (+25 ⚡)`}
                           </button>
                         )}
                       </>
@@ -775,7 +1038,7 @@ export default function App() {
         {/* Mobile Controls (Visible only on smaller screens) */}
         {isInGame && (
           <div className="md:hidden mt-2 flex justify-between gap-2 select-none touch-none z-20 relative w-full mb-1 px-2">
-              <div className="flex gap-2">
+              <div className="flex gap-4">
                   <button
                       onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('left'); }}
                       onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
@@ -784,7 +1047,7 @@ export default function App() {
                       onPointerUp={(e) => { handleMobileInputEnd('left'); }}
                       onPointerOut={(e) => { handleMobileInputEnd('left'); }}
                       onContextMenu={(e) => e.preventDefault()}
-                      className="w-12 h-12 bg-[#1E293B] border-b-4 border-l-4 border-[#334155] rounded-xl flex items-center justify-center text-2xl font-black text-white active:bg-[#334155] active:border-b-2 active:border-l-2 active:translate-x-[2px] active:translate-y-[2px] shadow-lg touch-manipulation focus:outline-none"
+                      className="w-24 h-16 bg-slate-700 border-b-4 border-r-4 border-slate-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-2xl uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-manipulation focus:outline-none"
                   >
                     ←
                   </button>
@@ -796,7 +1059,7 @@ export default function App() {
                       onPointerUp={(e) => { handleMobileInputEnd('right'); }}
                       onPointerOut={(e) => { handleMobileInputEnd('right'); }}
                       onContextMenu={(e) => e.preventDefault()}
-                      className="w-12 h-12 bg-[#1E293B] border-b-4 border-l-4 border-[#334155] rounded-xl flex items-center justify-center text-2xl font-black text-white active:bg-[#334155] active:border-b-2 active:border-l-2 active:translate-x-[2px] active:translate-y-[2px] shadow-lg touch-manipulation focus:outline-none"
+                      className="w-24 h-16 bg-slate-700 border-b-4 border-r-4 border-slate-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-2xl uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-manipulation focus:outline-none"
                   >
                     →
                   </button>
@@ -809,7 +1072,7 @@ export default function App() {
                   onPointerUp={(e) => { handleMobileInputEnd('jump'); }}
                   onPointerOut={(e) => { handleMobileInputEnd('jump'); }}
                   onContextMenu={(e) => e.preventDefault()}
-                  className="w-20 h-12 bg-pink-500 border-b-4 border-r-4 border-pink-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-lg uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-manipulation focus:outline-none"
+                  className="w-28 h-16 bg-pink-500 border-b-4 border-r-4 border-pink-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-xl uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-manipulation focus:outline-none"
               >
                 JUMP
               </button>
@@ -840,33 +1103,116 @@ export default function App() {
 
       {showLobby && (
         <div className="absolute inset-0 bg-[#0F172A]/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-[#1E293B] p-6 rounded-2xl border-4 border-[#334155] shadow-2xl max-w-md w-full relative">
+          <div className="bg-[#1E293B] p-6 rounded-2xl border-4 border-[#334155] shadow-2xl max-w-md w-full relative flex flex-col max-h-[80vh]">
              <button onClick={() => setShowLobby(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">✕</button>
              <h2 className="text-2xl font-black text-white uppercase tracking-widest mb-4">Lobby ({onlineUsers.length})</h2>
-             <div className="max-h-[300px] overflow-y-auto pr-2 flex flex-col gap-2">
-                 {onlineUsers.filter(u => u.uid !== user?.uid).map(u => (
-                    <div key={u.socketId} className="flex flex-row items-center justify-between bg-[#0F172A] p-3 rounded-lg border-2 border-[#334155]">
-                        <div className="flex items-center gap-3">
-                           {u.photoURL && <img src={u.photoURL} alt="avatar" className="w-10 h-10 rounded-md" referrerPolicy="no-referrer" />}
-                           <div>
-                              <div className="font-bold font-mono text-slate-200">{u.displayName}</div>
-                              <div className="text-xs text-slate-500 uppercase">{u.status}</div>
-                           </div>
-                        </div>
+             
+             {userProfile && (
+                 <div className="mb-4 bg-[#0F172A] p-3 rounded-lg border-2 border-[#334155]">
+                    <div className="text-xs text-slate-400 uppercase tracking-widest mb-1">Your Friend ID:</div>
+                    <div className="flex items-center gap-2">
+                        <div className="text-xl font-mono font-bold text-yellow-400 tracking-widest flex-1">{userProfile.friendCode}</div>
                         <button 
-                           onClick={() => { handleInvite(u.socketId); alert(`Invited ${u.displayName}`); }}
-                           disabled={u.status === 'playing'}
-                           className={`px-3 py-1.5 rounded uppercase font-bold text-xs tracking-wider border-2 ${
-                              u.status === 'playing' ? "bg-slate-700 text-slate-500 border-slate-600 opacity-50 cursor-not-allowed" : "bg-pink-600 text-white border-pink-800 hover:bg-pink-500"
-                           }`}
-                        >
-                           Invite
-                        </button>
+                           onClick={() => navigator.clipboard.writeText(userProfile.friendCode || "")} 
+                           className="px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded text-xs font-bold text-white uppercase"
+                        >Copy</button>
                     </div>
-                 ))}
-                 {onlineUsers.filter(u => u.uid !== user?.uid).length === 0 && (
-                    <div className="text-slate-400 text-center text-sm font-mono py-8">No other players online</div>
-                 )}
+                 </div>
+             )}
+
+             <div className="mb-4 flex flex-col gap-2">
+                 <div className="flex gap-2">
+                     <input 
+                         type="text" 
+                         value={friendCodeInput} 
+                         onChange={e => setFriendCodeInput(e.target.value.toUpperCase())}
+                         placeholder="ENTER FRIEND ID" 
+                         className="flex-1 bg-[#0F172A] border-2 border-slate-600 rounded-lg px-3 py-2 text-white font-mono uppercase focus:outline-none focus:border-pink-500"
+                         maxLength={6}
+                     />
+                     <button 
+                         onClick={async () => {
+                             if (!user || !friendCodeInput || friendCodeInput.length !== 6) return;
+                             setFriendMessage("Ekleniyor...");
+                             const res = await addFriendByCode(user.uid, friendCodeInput);
+                             setFriendMessage(res.message);
+                             if (res.success) {
+                                 setFriendCodeInput("");
+                                 // refresh profile to get new friend list
+                                 const updated = await getUserProfile(user.uid);
+                                 setUserProfile(updated);
+                             }
+                             setTimeout(() => setFriendMessage(""), 3000);
+                         }}
+                         disabled={friendCodeInput.length !== 6}
+                         className="px-4 py-2 bg-pink-600 hover:bg-pink-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold uppercase rounded-lg border-b-2 border-pink-800 active:border-b-0 active:translate-y-[2px]"
+                     >
+                         Add
+                     </button>
+                 </div>
+                 {friendMessage && <div className="text-xs font-mono text-yellow-400">{friendMessage}</div>}
+             </div>
+
+             <div className="overflow-y-auto pr-2 flex flex-col gap-4 flex-1 min-h-[150px]">
+                 {/* Online Friends */}
+                 <div>
+                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 border-b-2 border-slate-700 pb-1">Online Friends</h3>
+                     <div className="flex flex-col gap-2">
+                         {onlineUsers.filter(u => u.uid !== user?.uid && userProfile?.friends?.includes(u.uid)).map(u => (
+                            <div key={u.socketId} className="flex flex-row items-center justify-between bg-[#0F172A] p-3 rounded-lg border-2 border-yellow-500/30">
+                                <div className="flex items-center gap-3">
+                                   {u.photoURL ? <img src={u.photoURL} alt="avatar" className="w-8 h-8 rounded-md" referrerPolicy="no-referrer" /> : <div className="w-8 h-8 bg-slate-700 rounded-md"></div>}
+                                   <div>
+                                      <div className="font-bold font-mono text-yellow-400 text-sm flex items-center gap-1">⭐ {u.displayName}</div>
+                                      <div className="text-[10px] text-slate-500 uppercase">{u.status}</div>
+                                   </div>
+                                </div>
+                                <button 
+                                   onClick={() => { handleInvite(u.socketId); }}
+                                   disabled={u.status === 'playing'}
+                                   className={`px-3 py-1.5 rounded uppercase font-bold text-xs tracking-wider border-2 ${
+                                      u.status === 'playing' ? "bg-slate-700 text-slate-500 border-slate-600 opacity-50 cursor-not-allowed" : "bg-yellow-600 text-white border-yellow-800 hover:bg-yellow-500"
+                                   }`}
+                                >
+                                   Invite
+                                </button>
+                            </div>
+                         ))}
+                         {onlineUsers.filter(u => u.uid !== user?.uid && userProfile?.friends?.includes(u.uid)).length === 0 && (
+                            <div className="text-slate-500 text-xs font-mono italic">No friends online</div>
+                         )}
+                     </div>
+                 </div>
+
+                 {/* Other Players */}
+                 <div>
+                     <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-2 border-b-2 border-slate-700 pb-1">Global Online</h3>
+                     <div className="flex flex-col gap-2">
+                         {onlineUsers.filter(u => u.uid !== user?.uid && !userProfile?.friends?.includes(u.uid)).map(u => (
+                            <div key={u.socketId} className="flex flex-row items-center justify-between bg-[#0F172A] p-2 rounded-lg border border-[#334155]">
+                                <div className="flex items-center gap-2">
+                                   {u.photoURL ? <img src={u.photoURL} alt="avatar" className="w-6 h-6 rounded-md" referrerPolicy="no-referrer" /> : <div className="w-6 h-6 bg-slate-700 rounded-md"></div>}
+                                   <div>
+                                      <div className="font-bold font-mono text-slate-300 text-xs">{u.displayName}</div>
+                                      <div className="text-[9px] text-slate-500 uppercase">{u.status}</div>
+                                   </div>
+                                </div>
+                                <button 
+                                   onClick={() => { handleInvite(u.socketId); }}
+                                   disabled={u.status === 'playing'}
+                                   className={`px-2 py-1 rounded uppercase font-bold text-[10px] tracking-wider border ${
+                                      u.status === 'playing' ? "bg-slate-700 text-slate-500 border-slate-600 opacity-50 cursor-not-allowed" : "bg-slate-600 text-white border-slate-500 hover:bg-slate-500"
+                                   }`}
+                                >
+                                   Invite
+                                </button>
+                            </div>
+                         ))}
+                         {onlineUsers.filter(u => u.uid !== user?.uid && !userProfile?.friends?.includes(u.uid)).length === 0 && (
+                            <div className="text-slate-500 text-xs font-mono italic">No other players online</div>
+                         )}
+                     </div>
+                 </div>
              </div>
           </div>
         </div>
@@ -880,6 +1226,43 @@ export default function App() {
                <button onClick={handleDeclineInvite} className="flex-1 px-4 py-2 bg-slate-700 border-2 border-slate-600 rounded-lg font-bold text-white uppercase tracking-wider hover:bg-slate-600">Decline</button>
                <button onClick={handleAcceptInvite} className="flex-1 px-4 py-2 bg-yellow-500 border-2 border-yellow-700 rounded-lg font-bold text-slate-900 uppercase tracking-wider hover:bg-yellow-400 shadow-[2px_2px_0px_rgba(0,0,0,0.5)]">Accept</button>
             </div>
+        </div>
+      )}
+
+      {showLeaderboard && (
+        <div className="absolute inset-0 bg-[#0F172A]/90 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="bg-[#1E293B] p-6 md:p-8 rounded-3xl border-4 border-[#334155] shadow-2xl max-w-2xl w-full max-h-full overflow-y-auto relative flex flex-col">
+             <button onClick={() => setShowLeaderboard(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white bg-slate-800 rounded-full w-8 h-8 flex items-center justify-center">✕</button>
+             
+             <div className="flex justify-center items-center mb-8 border-b-2 border-slate-700 pb-4">
+                 <h2 className="text-3xl font-black text-white uppercase tracking-widest flex items-center gap-3">
+                    <Trophy className="w-8 h-8 text-yellow-500" />
+                    Top 50 Players
+                 </h2>
+             </div>
+             <div className="flex-grow space-y-3">
+               {topPlayers.length === 0 ? (
+                 <div className="text-center text-slate-400 py-10 font-mono">Yükleniyor...</div>
+               ) : (
+                 topPlayers.map((p, index) => (
+                   <div key={p.uid} className={`flex items-center justify-between p-4 rounded-xl bg-slate-800 border-2 ${index === 0 ? 'border-yellow-400' : index === 1 ? 'border-slate-300' : index === 2 ? 'border-amber-700' : 'border-slate-700'}`}>
+                     <div className="flex items-center gap-4">
+                       <span className={`font-black text-xl w-6 text-center ${index === 0 ? 'text-yellow-400' : index === 1 ? 'text-slate-300' : index === 2 ? 'text-amber-700' : 'text-slate-500'}`}>
+                         #{index + 1}
+                       </span>
+                       <span className="text-white font-bold font-mono flex items-center gap-2">
+                         {p.isAdmin && <span className="text-yellow-400">👑</span>}
+                         {p.displayName || "Misafir"}
+                       </span>
+                     </div>
+                     <span className="text-yellow-400 font-black font-mono tracking-wider flex items-center gap-1">
+                       {p.coins} <span className="text-sm">🪙</span>
+                     </span>
+                   </div>
+                 ))
+               )}
+             </div>
+          </div>
         </div>
       )}
 
@@ -951,6 +1334,53 @@ export default function App() {
         </div>
       )}
 
+      {showAdminPanel && userProfile?.isAdmin && (
+        <div className="absolute inset-0 bg-[#0F172A]/90 backdrop-blur-md z-[60] flex items-center justify-center p-4">
+          <div className="bg-[#1E293B] p-6 md:p-8 rounded-3xl border-4 border-red-900 shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto relative flex flex-col">
+             <button onClick={() => setShowAdminPanel(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white bg-slate-800 rounded-full w-8 h-8 flex items-center justify-center">✕</button>
+             
+             <div className="flex justify-between items-center mb-6 border-b-2 border-red-900 pb-4">
+                 <h2 className="text-2xl sm:text-3xl font-black text-red-500 uppercase tracking-widest flex items-center gap-3">
+                    <ShieldAlert className="w-8 h-8" />
+                    Admin Panel
+                 </h2>
+             </div>
+             <div className="flex-grow space-y-3">
+               {adminLoading ? (
+                 <div className="text-center text-slate-400 py-10 font-mono">Veriler Çekiliyor...</div>
+               ) : (
+                 allUsers.map((p) => (
+                   <div key={p.uid} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-xl bg-slate-800 border-2 border-slate-700 gap-4">
+                     <div className="flex items-center gap-3">
+                       <span className="text-white font-bold font-mono">
+                         {p.isAdmin && <span className="text-yellow-400 mr-2">👑</span>}
+                         {p.displayName || "Misafir"}
+                       </span>
+                       <span className="text-yellow-400 font-black font-mono tracking-wider bg-slate-900 px-2 py-1 rounded-md text-sm">
+                         {p.coins || 0} 🪙
+                       </span>
+                     </div>
+                     <div className="flex gap-2 w-full sm:w-auto">
+                       <button
+                         onClick={() => handleSendCoins(p.uid, 1000)}
+                         className="flex-1 sm:flex-none px-3 py-2 bg-green-600 hover:bg-green-500 text-white rounded-lg font-bold text-sm shadow-md active:translate-y-1 transition-all"
+                       >
+                         +1000
+                       </button>
+                       <button
+                         onClick={() => handleSendCoins(p.uid, 5000)}
+                         className="flex-1 sm:flex-none px-3 py-2 bg-yellow-600 hover:bg-yellow-500 text-white rounded-lg font-bold text-sm shadow-md active:translate-y-1 transition-all"
+                       >
+                         +5000
+                       </button>
+                     </div>
+                   </div>
+                 ))
+               )}
+             </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

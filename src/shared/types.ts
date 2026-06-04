@@ -73,7 +73,14 @@ export const STORE_ITEMS: StoreItem[] = [
   { id: "skin_devil", name: "Devil", emoji: "😈", price: 1000 },
   { id: "skin_robot", name: "Robot", emoji: "🤖", price: 1500 },
   { id: "skin_alien", name: "Alien", emoji: "👽", price: 2000 },
-  { id: "skin_king", name: "King", emoji: "👑", price: 5000 }
+  { id: "skin_ghost", name: "Ghost", emoji: "👻", price: 2500 },
+  { id: "skin_wizard", name: "Wizard", emoji: "🧙‍♂️", price: 3000 },
+  { id: "skin_rocket", name: "Rocket", emoji: "🚀", price: 4000 },
+  { id: "skin_king", name: "King", emoji: "👑", price: 5000 },
+  { id: "skin_fire", name: "Fire", emoji: "🔥", price: 7500 },
+  { id: "skin_diamond", name: "Diamond", emoji: "💎", price: 10000 },
+  { id: "skin_ninja", name: "Ninja", emoji: "🥷", price: 15000 },
+  { id: "skin_dragon", name: "Dragon", emoji: "🐉", price: 25000 }
 ];
 
 export interface UserProfile {
@@ -81,6 +88,12 @@ export interface UserProfile {
   coins: number;
   inventory: string[];
   equippedSkin: string | null;
+  friendCode?: string;
+  friends?: string[];
+  displayName?: string;
+  isAdmin?: boolean;
+  energy?: number;
+  lastEnergyUpdateTime?: number;
 }
 
 export interface ClientEvents {
