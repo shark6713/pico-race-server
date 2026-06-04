@@ -12,6 +12,7 @@ import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { AdMob, RewardAdOptions, AdLoadInfo, RewardAdPluginEvents } from '@capacitor-community/admob';
 
 export default function App() {
+  const [appAlert, setAppAlert] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const prevMeRef = useRef<any>(null);
   const localInputRef = useRef<PlayerInput>({ left: false, right: false, jump: false });
@@ -113,7 +114,7 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      alert("Giriş yapılırken hata oluştu: " + (e as Error).message);
+      setAppAlert("Giriş yapılırken hata oluştu: " + (e as Error).message);
     }
   };
 
@@ -139,7 +140,7 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      alert("Apple Girişi yapılırken hata oluştu: " + (e as Error).message);
+      setAppAlert("Apple Girişi yapılırken hata oluştu: " + (e as Error).message);
     }
   };
 
@@ -196,10 +197,10 @@ export default function App() {
       });
       // Update local state to reflect UI instantly
       setAllUsers(prev => prev.map(p => p.uid === targetUid ? { ...p, coins: (p.coins || 0) + amount } : p));
-      alert(`${amount} Coin başarıyla gönderildi!`);
+      setAppAlert(`${amount} Coin başarıyla gönderildi!`);
     } catch (e) {
       console.error("Coin send error:", e);
-      alert("Hata: Coin gönderilemedi. Lütfen kuralları güncellediğinizden emin olun.");
+      setAppAlert("Hata: Coin gönderilemedi. Lütfen kuralları güncellediğinizden emin olun.");
     }
   };
 
@@ -288,14 +289,9 @@ export default function App() {
     audioManager.init();
     audioManager.resume();
     
-    if (!socket?.connected) {
-        alert("Sunucuya bağlanılamadı, lütfen birkaç saniye bekleyip tekrar deneyin.");
-        return;
-    }
-    
     if (!userProfile?.isAdmin) {
       if (localEnergy < 10) {
-          alert("Yeterli enerjiniz yok! Biraz bekleyin veya reklam izleyin.");
+          setAppAlert("Yeterli enerjiniz yok! Biraz bekleyin veya reklam izleyin.");
           return;
       }
       const newEnergy = localEnergy - 10;
@@ -303,7 +299,7 @@ export default function App() {
       updateUserProfile(user.uid, { energy: newEnergy }).catch(e => console.log("Guest profile not saved:", e));
     }
     
-    socket.emit("findGame", { 
+    socket?.emit("findGame", { 
         displayName: userProfile?.displayName || user?.displayName || "Misafir", 
         skin: userProfile?.equippedSkin || undefined 
     });
@@ -338,13 +334,20 @@ export default function App() {
            }
        } catch (e) {
            console.error("AdMob Error:", e);
-           alert("Reklam gösterilirken bir hata oluştu veya zaman aşımına uğradı.");
+           setAppAlert("Cihazınızda reklam gösterilemedi (Emülatör hatası olabilir) ama test için +25 Enerji hesabınıza eklendi!");
+           
+           // Fallback for testing: give energy anyway
+           setLocalEnergy(e => {
+               const newE = Math.min(100, e + 25);
+               if (user) updateUserProfile(user.uid, { energy: newE, lastEnergyUpdateTime: lastTickRef.current }).catch(err => console.log(err));
+               return newE;
+           });
        } finally {
            setIsWatchingAd(false);
            loadAd();
        }
     } else {
-       alert("Reklam henüz yüklenmedi, lütfen birazdan tekrar deneyin.");
+       setAppAlert("Reklam henüz yüklenmedi, lütfen birazdan tekrar deneyin.");
     }
   };
 
@@ -421,7 +424,7 @@ export default function App() {
     });
 
     newSocket.on("inviteDeclined", (by: string) => {
-       alert(`${by} declined your invite.`);
+       setAppAlert(`${by} declined your invite.`);
     });
 
     newSocket.on("stateUpdate", (state: GameState) => {
@@ -765,6 +768,23 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#0F172A] relative flex flex-col items-center p-4 lg:p-8 font-sans text-white overflow-hidden">
+      {appAlert && (
+        <div className="absolute inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-[#1E293B] p-6 rounded-2xl border-4 border-red-500 shadow-2xl max-w-sm w-full flex flex-col items-center text-center animate-bounce-short">
+             <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
+                <span className="text-red-500 text-3xl">⚠️</span>
+             </div>
+             <h3 className="text-xl font-black text-white uppercase tracking-widest mb-2">Uyarı</h3>
+             <p className="text-slate-300 font-mono text-sm mb-6">{appAlert}</p>
+             <button 
+                onClick={() => setAppAlert(null)}
+                className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded-xl transition-colors uppercase tracking-widest"
+             >
+               Tamam
+             </button>
+          </div>
+        </div>
+      )}
       {/* Decorative Grid Background */}
       <div className="absolute inset-0 opacity-5 pointer-events-none" style={{ backgroundImage: "radial-gradient(#94A3B8 1px, transparent 1px)", backgroundSize: "40px 40px" }}></div>
       
