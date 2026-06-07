@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { GameState, PlayerInput } from "./shared/types";
-import { Trophy, RotateCcw, Zap, LogIn, LogOut, Edit2, Volume2, VolumeX, ListOrdered, ShieldAlert } from "lucide-react";
+import { Trophy, RotateCcw, Zap, LogIn, LogOut, Edit2, Volume2, VolumeX, ListOrdered, ShieldAlert, Trash2 } from "lucide-react";
 import { audioManager } from "./audio";
 import { auth, googleProvider, getUserProfile, updateUserProfile, addFriendByCode, db } from "./firebase";
-import { doc, onSnapshot, collection, query, orderBy, limit, getDocs, updateDoc, increment } from "firebase/firestore";
+import { doc, onSnapshot, collection, query, orderBy, limit, getDocs, updateDoc, increment, deleteDoc } from "firebase/firestore";
 import { UserProfile, STORE_ITEMS } from "./shared/types";
-import { signInWithPopup, User, onAuthStateChanged, signOut, signInAnonymously, signInWithCredential, GoogleAuthProvider, OAuthProvider } from "firebase/auth";
+import { signInWithPopup, User, onAuthStateChanged, signOut, signInAnonymously, signInWithCredential, GoogleAuthProvider, OAuthProvider, deleteUser } from "firebase/auth";
 import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
 import { AdMob, RewardAdOptions, AdLoadInfo, RewardAdPluginEvents } from '@capacitor-community/admob';
@@ -149,6 +149,29 @@ export default function App() {
     setUser(null);
   };
 
+  const handleDeleteAccount = async () => {
+    if (!user) return;
+    const confirmDelete = window.confirm("Dikkat! Hesabını silmek istediğine emin misin? Bu işlem geri alınamaz ve tüm skorların, altınların ve satın aldığın eşyalar kalıcı olarak silinir.");
+    if (!confirmDelete) return;
+
+    try {
+      // 1. Delete user document from Firestore
+      await deleteDoc(doc(db, "users", user.uid));
+      // 2. Delete user from Firebase Auth
+      await deleteUser(user);
+      setUser(null);
+      setAppAlert("Hesabın başarıyla silindi.");
+    } catch (e: any) {
+      console.error("Error deleting account:", e);
+      if (e.code === 'auth/requires-recent-login') {
+         setAppAlert("Güvenlik nedeniyle hesabını silebilmek için çıkış yapıp tekrar giriş yapman gerekiyor.");
+         await handleLogout();
+      } else {
+         setAppAlert("Hesap silinirken bir hata oluştu: " + e.message);
+      }
+    }
+  };
+
   const handleSaveName = async () => {
      if (!user) return;
      const newName = newNameInput.trim();
@@ -209,7 +232,7 @@ export default function App() {
       const q = query(collection(db, "users"), orderBy("coins", "desc"), limit(60));
       const snapshot = await getDocs(q);
       const players = snapshot.docs.map(doc => doc.data() as UserProfile);
-      setTopPlayers(players.filter(p => !p.isAdmin && p.displayName && p.displayName.trim() !== "").slice(0, 50));
+      setTopPlayers(players.filter(p => !p.isAdmin).slice(0, 50));
     } catch (e) {
       console.error("Leaderboard fetch error:", e);
     }
@@ -257,6 +280,9 @@ export default function App() {
     if (!Capacitor.isNativePlatform()) return;
     const initAdMob = async () => {
         try {
+          if (Capacitor.getPlatform() === 'ios') {
+             await AdMob.requestTrackingAuthorization();
+          }
           await AdMob.initialize({});
           AdMob.addListener(RewardAdPluginEvents.Loaded, () => setIsAdLoaded(true));
           AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
@@ -852,6 +878,9 @@ export default function App() {
                  <button title="Sign out" onClick={handleLogout} className="p-0.5 hover:bg-slate-800 rounded-md transition-colors">
                    <LogOut className="w-3 h-3 text-red-400" />
                  </button>
+                 <button title="Delete Account" onClick={handleDeleteAccount} className="p-0.5 hover:bg-slate-800 rounded-md transition-colors">
+                   <Trash2 className="w-3 h-3 text-red-600" />
+                 </button>
                </div>
             ) : null}
 
@@ -1064,7 +1093,7 @@ export default function App() {
 
         {/* Mobile Controls (Visible only on smaller screens) */}
         {isInGame && (
-          <div className="md:hidden mt-2 flex justify-between gap-2 select-none touch-none z-20 relative w-full mb-1 px-2">
+          <div className="2xl:hidden mt-2 flex justify-between gap-2 select-none touch-none z-20 relative w-full mb-1 px-2">
               <div className="flex gap-4">
                   <button
                       onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('left'); }}
