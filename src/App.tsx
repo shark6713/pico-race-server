@@ -197,6 +197,7 @@ export default function App() {
   const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
   const [adminLoading, setAdminLoading] = useState(false);
   const [audioRender, setAudioRender] = useState(0);
+  const [showUserMenu, setShowUserMenu] = useState(false);
 
   const fetchAllUsers = async () => {
     try {
@@ -875,12 +876,30 @@ export default function App() {
                         </button>
                     </div>
                  )}
-                 <button title="Sign out" onClick={handleLogout} className="p-0.5 hover:bg-slate-800 rounded-md transition-colors">
-                   <LogOut className="w-3 h-3 text-red-400" />
-                 </button>
-                 <button title="Delete Account" onClick={handleDeleteAccount} className="p-0.5 hover:bg-slate-800 rounded-md transition-colors">
-                   <Trash2 className="w-3 h-3 text-red-600" />
-                 </button>
+                 <div className="relative">
+                   <button onClick={() => setShowUserMenu(v => !v)} className="p-0.5 hover:bg-slate-800 rounded-md transition-colors">
+                     <LogOut className="w-3 h-3 text-red-400" />
+                   </button>
+                   {showUserMenu && (
+                     <div className="absolute right-0 top-6 bg-[#1E293B] border-2 border-slate-600 rounded-xl shadow-2xl z-50 min-w-[160px] overflow-hidden">
+                       <button
+                         onClick={() => { handleLogout(); setShowUserMenu(false); }}
+                         className="w-full flex items-center gap-2 px-4 py-3 text-sm text-slate-200 hover:bg-slate-700 transition-colors"
+                       >
+                         <LogOut className="w-4 h-4 text-red-400" />
+                         <span>Çıkış Yap</span>
+                       </button>
+                       <div className="border-t border-slate-700" />
+                       <button
+                         onClick={() => { handleDeleteAccount(); setShowUserMenu(false); }}
+                         className="w-full flex items-center gap-2 px-4 py-3 text-sm text-red-400 hover:bg-red-900/40 transition-colors"
+                       >
+                         <Trash2 className="w-4 h-4 text-red-500" />
+                         <span>Hesabı Sil</span>
+                       </button>
+                     </div>
+                   )}
+                 </div>
                </div>
             ) : null}
 
