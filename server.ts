@@ -88,6 +88,18 @@ function createRoom(): GameState {
   const roomId = Math.random().toString(36).substring(2, 9);
   const stitched = generateStitchedMap(3);
   
+  let cp1 = 50;
+  let cp2X = stitched.width * 0.33;
+  let cp2 = 50;
+  for (const b of stitched.blocks) {
+      if (b.x <= cp2X && b.x > cp2 && b.y >= 200) cp2 = b.x + 10;
+  }
+  let cp3X = stitched.width * 0.66;
+  let cp3 = cp2;
+  for (const b of stitched.blocks) {
+      if (b.x <= cp3X && b.x > cp3 && b.y >= 200) cp3 = b.x + 10;
+  }
+  
   const state: GameState = {
     id: roomId,
     players: {},
@@ -103,6 +115,7 @@ function createRoom(): GameState {
     status: 'waiting',
     waitTimer: 312,
     bgTheme: stitched.bgTheme,
+    checkpoints: [cp1, cp2, cp3],
   };
   
   rooms[roomId] = state;
@@ -374,13 +387,13 @@ setInterval(() => {
       // Boundaries Y
       if (player.y > room.mapHeight + 100) { // fell off
         player.y = 100;
-        let safeX = 50;
-        for (const b of room.blocks) {
-            if (b.x < player.x && b.x > safeX && b.y >= 200) {
-                safeX = b.x + 10;
+        let respawnX = room.checkpoints[0];
+        for (const cp of room.checkpoints) {
+            if (player.x > cp) {
+                respawnX = cp;
             }
         }
-        player.x = safeX;
+        player.x = respawnX;
         player.vy = 0;
         player.vx = 0;
       }
