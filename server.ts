@@ -32,25 +32,68 @@ function broadcastOnlineUsers() {
    io.emit("onlineUsers", Object.values(onlineUsers));
 }
 
+function generateStitchedMap(numMaps: number): { blocks: Block[], finishLine: any, width: number, height: number, bgTheme: string } {
+    const blocks: Block[] = [];
+    let currentXOffset = 0;
+    let finalWidth = 0;
+    let maxHeight = 0;
+    
+    // Pick first map randomly for theme
+    const firstMapIndex = Math.floor(Math.random() * LEVELS.length);
+    const bgTheme = LEVELS[firstMapIndex].bgTheme;
+    
+    let lastFinishLine: any = null;
+
+    for (let i = 0; i < numMaps; i++) {
+        const levelIndex = (i === 0) ? firstMapIndex : Math.floor(Math.random() * LEVELS.length);
+        const level = LEVELS[levelIndex];
+        
+        // Copy and shift blocks
+        for (const block of level.blocks) {
+            blocks.push({
+                ...block,
+                x: block.x + currentXOffset
+            });
+        }
+        
+        lastFinishLine = {
+            ...level.finishLine,
+            x: level.finishLine.x + currentXOffset
+        };
+        
+        currentXOffset += level.width;
+        finalWidth = currentXOffset;
+        maxHeight = Math.max(maxHeight, level.height);
+    }
+    
+    return {
+        blocks,
+        finishLine: lastFinishLine,
+        width: finalWidth,
+        height: maxHeight,
+        bgTheme
+    };
+}
+
 function createRoom(): GameState {
   const roomId = Math.random().toString(36).substring(2, 9);
-  const currentLevelIndex = 0;
+  const stitched = generateStitchedMap(3);
   
   const state: GameState = {
     id: roomId,
     players: {},
-    blocks: LEVELS[currentLevelIndex].blocks,
-    finishLine: LEVELS[currentLevelIndex].finishLine,
-    mapWidth: LEVELS[currentLevelIndex].width,
-    mapHeight: LEVELS[currentLevelIndex].height,
-    currentLevel: currentLevelIndex + 1,
+    blocks: stitched.blocks,
+    finishLine: stitched.finishLine,
+    mapWidth: stitched.width,
+    mapHeight: stitched.height,
+    currentLevel: 1,
     raceCount: 1,
-    totalRaces: 10,
+    totalRaces: 1,
     finishCounter: 1,
     countdown: null,
     status: 'waiting',
     waitTimer: 312,
-    bgTheme: LEVELS[currentLevelIndex].bgTheme,
+    bgTheme: stitched.bgTheme,
   };
   
   rooms[roomId] = state;
