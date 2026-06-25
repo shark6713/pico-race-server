@@ -324,7 +324,7 @@ setInterval(() => {
       }
       // Check player-player collision X
       for (const other of players) {
-        if (other.id !== player.id && checkCollision(player, other)) {
+        if (other.id !== player.id && !player.finished && !other.finished && checkCollision(player, other)) {
            if (player.vx > 0) player.x = other.x - player.width;
            else if (player.vx < 0) player.x = other.x + other.width;
            player.vx = 0;
@@ -352,7 +352,7 @@ setInterval(() => {
       }
       // Check player-player collision Y (allowing stacking)
       for (const other of players) {
-        if (other.id !== player.id && checkCollision(player, other)) {
+        if (other.id !== player.id && !player.finished && !other.finished && checkCollision(player, other)) {
           if (player.vy > 0) {
             player.y = other.y - player.height;
             player.isGrounded = true;
