@@ -48,6 +48,15 @@ function generateStitchedMap(numMaps: number): { blocks: Block[], finishLine: an
         const levelIndex = (i === 0) ? firstMapIndex : Math.floor(Math.random() * LEVELS.length);
         const level = LEVELS[levelIndex];
         
+        if (i > 0) {
+            blocks.push({
+                x: currentXOffset - 150,
+                y: 550,
+                width: 300,
+                height: 50
+            });
+        }
+        
         // Copy and shift blocks
         for (const block of level.blocks) {
             blocks.push({
@@ -365,7 +374,13 @@ setInterval(() => {
       // Boundaries Y
       if (player.y > room.mapHeight + 100) { // fell off
         player.y = 100;
-        player.x = 50;
+        let safeX = 50;
+        for (const b of room.blocks) {
+            if (b.x < player.x && b.x > safeX && b.y >= 200) {
+                safeX = b.x + 10;
+            }
+        }
+        player.x = safeX;
         player.vy = 0;
         player.vx = 0;
       }
