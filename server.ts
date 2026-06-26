@@ -202,13 +202,18 @@ function checkCollision(r1: {x: number, y: number, width: number, height: number
 }
 
 // Predictive AI Simulation
-function predictOutcome(player: Player, room: GameState, jumpRequested: boolean): number {
+function predictOutcome(player: Player, room: GameState, action: {left: boolean, right: boolean, jump: boolean}): number {
     let { x, y, vx, vy, isGrounded } = player;
     
-    for (let frame = 0; frame < 45; frame++) {
-        vx = MOVE_SPEED; // Bots always try to move right
+    // Simulate physics for 60 frames (1 second) to see wider gaps
+    for (let frame = 0; frame < 60; frame++) {
+        // Apply input
+        if (action.left) vx = -MOVE_SPEED;
+        else if (action.right) vx = MOVE_SPEED;
+        else vx *= FRICTION;
         
-        if (frame === 0 && jumpRequested && isGrounded) {
+        // Jump only allowed on first frame if grounded
+        if (frame === 0 && action.jump && isGrounded) {
             vy = JUMP_FORCE;
             isGrounded = false;
         }
@@ -246,7 +251,11 @@ function predictOutcome(player: Player, room: GameState, jumpRequested: boolean)
         if (vx === 0) return x - 500; // Stuck penalty
     }
     
-    return x;
+    // Penalize slightly for choosing to move left if it's not strictly necessary to survive
+    let score = x;
+    if (action.left) score -= 100;
+    
+    return score;
 }
 
 // Game Loop
@@ -309,33 +318,58 @@ setInterval(() => {
       if (room.status === 'playing') {
         // Bot logic
         if (player.isBot) {
-           player.input.right = true;
-           player.input.left = false;
-           
-           let jumpRequested = false;
-
            if (player.isGrounded) {
-               // PREDICTIVE AI: Simulate both futures
-               const scoreNoJump = predictOutcome(player, room, false);
-               const scoreJump = predictOutcome(player, room, true);
+               // PREDICTIVE AI: Evaluate basic actions
+               const actions = [
+                   { right: true, left: false, jump: false },
+                   { right: true, left: false, jump: true },
+                   { right: false, left: true, jump: false },
+                   { right: false, left: true, jump: true },
+                   { right: false, left: false, jump: false }
+               ];
                
-               // If jumping results in a significantly better outcome, jump!
-               // (Random factor added so bots aren't 100% flawless robots)
-               if (scoreJump > scoreNoJump + 5 && Math.random() < 0.95) {
-                   jumpRequested = true;
-               } else if (scoreNoJump === -9999 && scoreJump > -9999) {
-                   // Always jump if not jumping means certain death
-                   jumpRequested = true;
+               let bestScore = -Infinity;
+               let bestAction = actions[0];
+               
+               for (const action of actions) {
+                   const score = predictOutcome(player, room, action);
+                   // Add slight noise to score to avoid perfectly robotic behavior
+                   const noisyScore = score + (Math.random() * 20 - 10);
+                   if (noisyScore > bestScore) {
+                       bestScore = noisyScore;
+                       bestAction = action;
+                   }
+               }
+               
+               // Apply best action
+               // To avoid bots being TOO perfect, occasionally ignore logic and do a random jump
+               if (Math.random() < 0.02) {
+                   player.input.jump = true;
+                   player.input.right = true;
+                   player.input.left = false;
+               } else {
+                   player.input.left = bestAction.left;
+                   player.input.right = bestAction.right;
+                   player.input.jump = bestAction.jump;
                }
            } else {
-               // Mid-air recovery: if stuck against a wall while falling, briefly back up to unstuck
-               if (player.vx === 0 && player.vy > 0 && Math.random() < 0.1) {
-                   player.input.right = false;
+               // Mid-air logic
+               const scoreRight = predictOutcome(player, room, { right: true, left: false, jump: false });
+               const scoreLeft = predictOutcome(player, room, { right: false, left: true, jump: false });
+               const scoreIdle = predictOutcome(player, room, { right: false, left: false, jump: false });
+               
+               if (scoreLeft > scoreRight + 20 && scoreLeft > scoreIdle) {
                    player.input.left = true;
+                   player.input.right = false;
+               } else if (scoreIdle > scoreRight + 20) {
+                   player.input.left = false;
+                   player.input.right = false;
+               } else {
+                   player.input.left = false;
+                   player.input.right = true;
                }
+               player.input.jump = false;
            }
-           
-           player.input.jump = jumpRequested;
         }
         
         // Input horizontal
