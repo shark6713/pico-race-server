@@ -205,8 +205,8 @@ function checkCollision(r1: {x: number, y: number, width: number, height: number
 function predictOutcome(player: Player, room: GameState, action: {left: boolean, right: boolean, jump: boolean}): number {
     let { x, y, vx, vy, isGrounded } = player;
     
-    // Simulate physics for 90 frames (1.5 seconds) to see wider gaps
-    for (let frame = 0; frame < 90; frame++) {
+    // Simulate physics for 45 frames (0.75 seconds) to prevent over-predicting future deaths from constant input
+    for (let frame = 0; frame < 45; frame++) {
         // Apply input
         if (action.left) vx = -MOVE_SPEED;
         else if (action.right) vx = MOVE_SPEED;
