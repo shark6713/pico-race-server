@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { GameState, PlayerInput } from "./shared/types";
-import { Trophy, RotateCcw, Zap, LogIn, LogOut, Edit2, Volume2, VolumeX, ListOrdered, ShieldAlert, Trash2 } from "lucide-react";
+import { Trophy, RotateCcw, Zap, LogIn, LogOut, Edit2, Volume2, VolumeX, ListOrdered, ShieldAlert, Trash2, Users, Store } from "lucide-react";
 import { audioManager } from "./audio";
 import { auth, googleProvider, getUserProfile, updateUserProfile, addFriendByCode, db } from "./firebase";
 import { doc, onSnapshot, collection, query, orderBy, limit, getDocs, updateDoc, increment, deleteDoc } from "firebase/firestore";
