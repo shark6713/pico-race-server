@@ -323,24 +323,32 @@ setInterval(() => {
       if (room.status === 'playing') {
         // Bot logic
         if (player.isBot) {
-           // PREDICTIVE AI: Evaluate sequences of actions (MPC)
-           const rightSequences = [
-               [{ right: true, left: false, jump: false, frames: 45 }], // Run right
-               [{ right: true, left: false, jump: true, frames: 45 }],  // Jump right immediately
-               [{ right: true, left: false, jump: false, frames: 10 }, { right: true, left: false, jump: true, frames: 35 }], // Run 10 then jump
-               [{ right: true, left: false, jump: false, frames: 20 }, { right: true, left: false, jump: true, frames: 25 }], // Run 20 then jump
-               [{ right: true, left: false, jump: false, frames: 30 }, { right: true, left: false, jump: true, frames: 15 }]  // Run 30 then jump
+           // @ts-ignore
+           player.aiCooldown = (player.aiCooldown || 0) - 1;
+           // @ts-ignore
+           if (player.aiCooldown > 0) {
+               // Skip heavy AI evaluation to save CPU, keep using previous inputs
+           } else {
+               // @ts-ignore
+               player.aiCooldown = 4; // Evaluate every 4 frames (saves 75% CPU)
+
+               // PREDICTIVE AI: Evaluate sequences of actions (MPC)
+               const rightSequences = [
+               [{ right: true, left: false, jump: false, frames: 30 }], 
+               [{ right: true, left: false, jump: true, frames: 30 }],  
+               [{ right: true, left: false, jump: false, frames: 10 }, { right: true, left: false, jump: true, frames: 20 }], 
+               [{ right: true, left: false, jump: false, frames: 20 }, { right: true, left: false, jump: true, frames: 10 }]  
            ];
            const leftSequences = [
-               [{ right: false, left: true, jump: false, frames: 45 }], // Back up
-               [{ right: false, left: true, jump: true, frames: 45 }],  // Jump left immediately
-               [{ right: false, left: true, jump: false, frames: 10 }, { right: false, left: true, jump: true, frames: 35 }],
-               [{ right: false, left: true, jump: false, frames: 20 }, { right: false, left: true, jump: true, frames: 25 }]
+               [{ right: false, left: true, jump: false, frames: 30 }], 
+               [{ right: false, left: true, jump: true, frames: 30 }],  
+               [{ right: false, left: true, jump: false, frames: 10 }, { right: false, left: true, jump: true, frames: 20 }],
+               [{ right: false, left: true, jump: false, frames: 20 }, { right: false, left: true, jump: true, frames: 10 }]
            ];
            const idleSequences = [
-               [{ right: false, left: false, jump: false, frames: 45 }], // Idle
-               [{ right: false, left: false, jump: true, frames: 15 }, { right: true, left: false, jump: false, frames: 30 }], // Jump straight then right
-               [{ right: false, left: false, jump: true, frames: 15 }, { right: false, left: true, jump: false, frames: 30 }]  // Jump straight then left
+               [{ right: false, left: false, jump: false, frames: 30 }], 
+               [{ right: false, left: false, jump: true, frames: 10 }, { right: true, left: false, jump: false, frames: 20 }], 
+               [{ right: false, left: false, jump: true, frames: 10 }, { right: false, left: true, jump: false, frames: 20 }]  
            ];
            
            let scoreRight = -Infinity;
@@ -403,6 +411,7 @@ setInterval(() => {
                    player.input.right = true;
                }
                player.input.jump = false;
+            }
            }
         }
         
