@@ -323,31 +323,61 @@ setInterval(() => {
       if (room.status === 'playing') {
         // Bot logic
         if (player.isBot) {
+           // PREDICTIVE AI: Evaluate sequences of actions (MPC)
+           const rightSequences = [
+               [{ right: true, left: false, jump: false, frames: 45 }], // Run right
+               [{ right: true, left: false, jump: true, frames: 45 }],  // Jump right immediately
+               [{ right: true, left: false, jump: false, frames: 10 }, { right: true, left: false, jump: true, frames: 35 }], // Run 10 then jump
+               [{ right: true, left: false, jump: false, frames: 20 }, { right: true, left: false, jump: true, frames: 25 }], // Run 20 then jump
+               [{ right: true, left: false, jump: false, frames: 30 }, { right: true, left: false, jump: true, frames: 15 }]  // Run 30 then jump
+           ];
+           const leftSequences = [
+               [{ right: false, left: true, jump: false, frames: 45 }], // Back up
+               [{ right: false, left: true, jump: true, frames: 45 }],  // Jump left immediately
+               [{ right: false, left: true, jump: false, frames: 10 }, { right: false, left: true, jump: true, frames: 35 }],
+               [{ right: false, left: true, jump: false, frames: 20 }, { right: false, left: true, jump: true, frames: 25 }]
+           ];
+           const idleSequences = [
+               [{ right: false, left: false, jump: false, frames: 45 }], // Idle
+               [{ right: false, left: false, jump: true, frames: 15 }, { right: true, left: false, jump: false, frames: 30 }], // Jump straight then right
+               [{ right: false, left: false, jump: true, frames: 15 }, { right: false, left: true, jump: false, frames: 30 }]  // Jump straight then left
+           ];
+           
+           let scoreRight = -Infinity;
+           let bestRightSeq = rightSequences[0];
+           for (const seq of rightSequences) {
+               const s = predictOutcome(player, room, seq);
+               if (s > scoreRight) { scoreRight = s; bestRightSeq = seq; }
+           }
+           
+           let scoreLeft = -Infinity;
+           let bestLeftSeq = leftSequences[0];
+           for (const seq of leftSequences) {
+               const s = predictOutcome(player, room, seq);
+               if (s > scoreLeft) { scoreLeft = s; bestLeftSeq = seq; }
+           }
+           
+           let scoreIdle = -Infinity;
+           let bestIdleSeq = idleSequences[0];
+           for (const seq of idleSequences) {
+               const s = predictOutcome(player, room, seq);
+               if (s > scoreIdle) { scoreIdle = s; bestIdleSeq = seq; }
+           }
+           
            if (player.isGrounded) {
-               // PREDICTIVE AI: Evaluate sequences of actions (MPC)
-               const sequences = [
-                   [{ right: true, left: false, jump: false, frames: 45 }], // 0: Run right
-                   [{ right: true, left: false, jump: true, frames: 45 }],  // 1: Jump right
-                   [{ right: false, left: false, jump: true, frames: 15 }, { right: true, left: false, jump: false, frames: 30 }], // 2: Jump straight, then right
-                   [{ right: false, left: true, jump: true, frames: 15 }, { right: true, left: false, jump: false, frames: 30 }], // 3: Jump left, then right
-                   [{ right: false, left: false, jump: false, frames: 45 }], // 4: Idle
-                   [{ right: false, left: true, jump: false, frames: 45 }], // 5: Back up
-                   [{ right: false, left: true, jump: false, frames: 15 }, { right: true, left: false, jump: true, frames: 30 }] // 6: Back up then running jump
-               ];
+               // Grounded: Pick absolute best without hysteresis
+               let bestScore = scoreRight;
+               let bestAction = bestRightSeq[0];
                
-               let bestScore = -Infinity;
-               let bestSequenceIndex = 0;
-               
-               for (let i = 0; i < sequences.length; i++) {
-                   const score = predictOutcome(player, room, sequences[i]);
-                   if (score > bestScore) {
-                       bestScore = score;
-                       bestSequenceIndex = i;
-                   }
+               if (scoreLeft > bestScore) {
+                   bestScore = scoreLeft;
+                   bestAction = bestLeftSeq[0];
+               }
+               if (scoreIdle > bestScore) {
+                   bestScore = scoreIdle;
+                   bestAction = bestIdleSeq[0];
                }
                
-               // Apply only the FIRST frame of the FIRST step of the best sequence
-               const bestAction = sequences[bestSequenceIndex][0];
                player.input.left = bestAction.left;
                player.input.right = bestAction.right;
                player.input.jump = bestAction.jump;
@@ -361,12 +391,7 @@ setInterval(() => {
                    }
                }
            } else {
-               // Mid-air logic
-               const scoreRight = predictOutcome(player, room, [{ right: true, left: false, jump: false, frames: 45 }]);
-               const scoreLeft = predictOutcome(player, room, [{ right: false, left: true, jump: false, frames: 45 }]);
-               const scoreIdle = predictOutcome(player, room, [{ right: false, left: false, jump: false, frames: 45 }]);
-               
-               // Require a significant advantage to change momentum mid-air
+               // Mid-air: Require hysteresis to change direction
                if (scoreLeft > scoreRight + 50 && scoreLeft > scoreIdle) {
                    player.input.left = true;
                    player.input.right = false;
