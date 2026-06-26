@@ -26,6 +26,7 @@ export interface Player {
   skin?: string;
   placements: number[];
   currentPlacement: number | null;
+  score?: number;
 }
 
 export interface Block {
@@ -50,6 +51,8 @@ export interface GameState {
   status: 'waiting' | 'playing' | 'finished';
   waitTimer: number | null;
   bgTheme: string;
+  checkpoints: number[];
+  isSinglePlayer?: boolean;
 }
 
 export interface OnlineUser {
@@ -86,6 +89,7 @@ export const STORE_ITEMS: StoreItem[] = [
 export interface UserProfile {
   uid: string;
   coins: number;
+  highScore?: number;
   inventory: string[];
   equippedSkin: string | null;
   friendCode?: string;
@@ -99,6 +103,7 @@ export interface UserProfile {
 export interface ClientEvents {
   auth: (user: { uid: string; displayName: string; email: string; photoURL?: string }) => void;
   findGame: (data?: { displayName?: string; skin?: string }) => void;
+  startSinglePlayer: (data?: { displayName?: string; skin?: string }) => void;
   input: (input: PlayerInput) => void;
   leaveGame: () => void;
   inviteUser: (targetSocketId: string) => void;

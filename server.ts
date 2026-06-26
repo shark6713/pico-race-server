@@ -122,6 +122,33 @@ function createRoom(): GameState {
   return state;
 }
 
+function createSinglePlayerRoom(): GameState {
+  const roomId = "sp_" + Math.random().toString(36).substring(2, 9);
+  const stitched = generateStitchedMap(10);
+  
+  const state: GameState = {
+    id: roomId,
+    players: {},
+    blocks: stitched.blocks,
+    finishLine: stitched.finishLine,
+    mapWidth: stitched.width,
+    mapHeight: stitched.height,
+    currentLevel: 1,
+    raceCount: 1,
+    totalRaces: 1,
+    finishCounter: 1,
+    countdown: null,
+    status: 'playing',
+    waitTimer: null,
+    bgTheme: stitched.bgTheme,
+    checkpoints: [50],
+    isSinglePlayer: true
+  };
+  
+  rooms[roomId] = state;
+  return state;
+}
+
 function nextLevel(room: GameState) {
     // Save placements
     Object.values(room.players).forEach(p => {
@@ -386,16 +413,45 @@ setInterval(() => {
       }
       // Boundaries Y
       if (player.y > room.mapHeight + 100) { // fell off
-        player.y = 100;
-        let respawnX = room.checkpoints[0];
-        for (const cp of room.checkpoints) {
-            if (player.x > cp) {
-                respawnX = cp;
-            }
+        if (room.isSinglePlayer) {
+             room.status = 'finished';
+             player.finished = true;
+        } else {
+             player.y = 100;
+             let respawnX = room.checkpoints[0];
+             for (const cp of room.checkpoints) {
+                 if (player.x > cp) {
+                     respawnX = cp;
+                 }
+             }
+             player.x = respawnX;
+             player.vy = 0;
+             player.vx = 0;
         }
-        player.x = respawnX;
-        player.vy = 0;
-        player.vx = 0;
+      }
+
+      if (room.isSinglePlayer) {
+          player.score = Math.floor(player.x / 10);
+          
+          if (player.x > room.mapWidth - 3000) {
+              const randomLevel = LEVELS[Math.floor(Math.random() * LEVELS.length)];
+              
+              room.blocks.push({
+                  x: room.mapWidth - 150,
+                  y: 550,
+                  width: 300,
+                  height: 50
+              });
+              
+              for (const block of randomLevel.blocks) {
+                  room.blocks.push({
+                      ...block,
+                      x: block.x + room.mapWidth
+                  });
+              }
+              room.mapWidth += randomLevel.width;
+              room.mapHeight = Math.max(room.mapHeight, randomLevel.height);
+          }
       }
 
       // Check finish line
@@ -482,13 +538,30 @@ io.on("connection", (socket) => {
     socket.emit("searching");
     setTimeout(() => {
       // Find room in rooms with < 4 players and no countdown and status is waiting
-      let foundRoom = Object.values(rooms).find(r => Object.keys(r.players).length < 4 && r.countdown === null && r.status === 'waiting');
+      let foundRoom = Object.values(rooms).find(r => Object.keys(r.players).length < 4 && r.countdown === null && r.status === 'waiting' && !r.isSinglePlayer);
       if (!foundRoom) {
           foundRoom = createRoom();
       }
       
       enterGame(foundRoom, data.displayName, data.skin);
     }, 1500); 
+  });
+
+  socket.on("startSinglePlayer", (data: { displayName?: string; skin?: string } = {}) => {
+    if (playerRoomMap[socket.id]) {
+      const oldRoomId = playerRoomMap[socket.id];
+      if (rooms[oldRoomId] && rooms[oldRoomId].players[socket.id]) {
+          delete rooms[oldRoomId].players[socket.id];
+      }
+    }
+
+    if (onlineUsers[socket.id]) {
+        onlineUsers[socket.id].status = 'playing';
+        broadcastOnlineUsers();
+    }
+
+    const newRoom = createSinglePlayerRoom();
+    enterGame(newRoom, data.displayName, data.skin);
   });
 
   socket.on("inviteUser", (targetSocketId) => {

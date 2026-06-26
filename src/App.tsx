@@ -9,7 +9,7 @@ import { UserProfile, STORE_ITEMS } from "./shared/types";
 import { signInWithPopup, User, onAuthStateChanged, signOut, signInAnonymously, signInWithCredential, GoogleAuthProvider, OAuthProvider, deleteUser } from "firebase/auth";
 import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
-import { AdMob, RewardAdOptions, AdLoadInfo, RewardAdPluginEvents } from '@capacitor-community/admob';
+import { AdMob, RewardAdOptions, AdLoadInfo, RewardAdPluginEvents, InterstitialAdPluginEvents } from '@capacitor-community/admob';
 
 export default function App() {
   const [appAlert, setAppAlert] = useState<string | null>(null);
@@ -58,7 +58,7 @@ export default function App() {
     if (!socket || !user) return;
     socket.emit("auth", {
         uid: user.uid,
-        displayName: userProfile?.displayName || user.displayName || "Misafir",
+        displayName: userProfile?.displayName || user.displayName || "Guest",
         photoURL: user.photoURL
     });
   }, [socket, user, userProfile?.displayName]);
@@ -94,7 +94,7 @@ export default function App() {
     }
     setUser({
       uid: fakeId,
-      displayName: "Misafir",
+      displayName: "Guest",
       email: null,
       photoURL: null
     } as any);
@@ -114,7 +114,7 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      setAppAlert("Giriş yapılırken hata oluştu: " + (e as Error).message);
+      setAppAlert("Login failed: " + (e as Error).message);
     }
   };
 
@@ -140,7 +140,7 @@ export default function App() {
       }
     } catch (e) {
       console.error(e);
-      setAppAlert("Apple Girişi yapılırken hata oluştu: " + (e as Error).message);
+      setAppAlert("Apple login failed: " + (e as Error).message);
     }
   };
 
@@ -151,7 +151,7 @@ export default function App() {
 
   const handleDeleteAccount = async () => {
     if (!user) return;
-    const confirmDelete = window.confirm("Dikkat! Hesabını silmek istediğine emin misin? Bu işlem geri alınamaz ve tüm skorların, altınların ve satın aldığın eşyalar kalıcı olarak silinir.");
+    const confirmDelete = window.confirm("Warning! Are you sure you want to delete your account? This action cannot be undone. All your scores, coins, and purchased items will be permanently deleted.");
     if (!confirmDelete) return;
 
     try {
@@ -160,14 +160,14 @@ export default function App() {
       // 2. Delete user from Firebase Auth
       await deleteUser(user);
       setUser(null);
-      setAppAlert("Hesabın başarıyla silindi.");
+      setAppAlert("Your account has been successfully deleted.");
     } catch (e: any) {
       console.error("Error deleting account:", e);
       if (e.code === 'auth/requires-recent-login') {
-         setAppAlert("Güvenlik nedeniyle hesabını silebilmek için çıkış yapıp tekrar giriş yapman gerekiyor.");
+         setAppAlert("For security reasons, please sign out and sign back in before deleting your account.");
          await handleLogout();
       } else {
-         setAppAlert("Hesap silinirken bir hata oluştu: " + e.message);
+         setAppAlert("An error occurred while deleting your account: " + e.message);
       }
     }
   };
@@ -189,6 +189,7 @@ export default function App() {
 
   const [isAdLoaded, setIsAdLoaded] = useState(false);
   const [isWatchingAd, setIsWatchingAd] = useState(false);
+  const isInterstitialLoadedRef = useRef(false);
   
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [topPlayers, setTopPlayers] = useState<UserProfile[]>([]);
@@ -198,6 +199,57 @@ export default function App() {
   const [adminLoading, setAdminLoading] = useState(false);
   const [audioRender, setAudioRender] = useState(0);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const userProfileRef = useRef<UserProfile | null>(null);
+  const pendingRewardTypeRef = useRef<'energy' | 'coins'>('energy');
+  const rewardGivenRef = useRef(false);
+  const singlePlayerRewardGivenRef = useRef(false);
+
+  useEffect(() => {
+    if (gameState?.status === 'finished' && gameState.isSinglePlayer) {
+        if (!singlePlayerRewardGivenRef.current) {
+            singlePlayerRewardGivenRef.current = true;
+            const me = gameState.players[myId];
+            if (me && me.score && userProfile) {
+                const coinsEarned = Math.floor(me.score * 0.05);
+                if (coinsEarned > 0) {
+                    updateUserProfile(userProfile.uid, { coins: (userProfile.coins || 0) + coinsEarned });
+                    setAppAlert(`Run Ended! You earned ${coinsEarned} Coins!`);
+                }
+            }
+        }
+    } else if (gameState?.status === 'playing') {
+        singlePlayerRewardGivenRef.current = false;
+    }
+  }, [gameState?.status, gameState?.players, gameState?.isSinglePlayer, myId, userProfile]);
+
+  const giveAdReward = (type: 'energy' | 'coins') => {
+      if (rewardGivenRef.current) return;
+      rewardGivenRef.current = true;
+      if (type === 'energy') {
+         setLocalEnergy(e => {
+             const newE = Math.min(100, e + 33);
+             const uid = auth.currentUser?.uid || userProfileRef.current?.uid;
+             if (uid) updateUserProfile(uid, { energy: newE, lastEnergyUpdateTime: lastTickRef.current }).catch(err => console.log(err));
+             return newE;
+         });
+         setAppAlert("+33 Energy added!");
+      } else {
+         const currentProfile = userProfileRef.current;
+         if (currentProfile && currentProfile.uid) {
+             const currentCoins = Number(currentProfile.coins) || 0;
+             const newCoins = currentCoins + 50;
+             setUserProfile({ ...currentProfile, coins: newCoins });
+             updateUserProfile(currentProfile.uid, { coins: newCoins }).catch(err => console.log(err));
+             setAppAlert("+50 Coins added!");
+         } else {
+             setAppAlert("Error: Profile not found. Coins not added.");
+         }
+      }
+  };
+
+  useEffect(() => {
+    userProfileRef.current = userProfile;
+  }, [userProfile]);
 
   const fetchAllUsers = async () => {
     try {
@@ -221,16 +273,16 @@ export default function App() {
       });
       // Update local state to reflect UI instantly
       setAllUsers(prev => prev.map(p => p.uid === targetUid ? { ...p, coins: (p.coins || 0) + amount } : p));
-      setAppAlert(`${amount} Coin başarıyla gönderildi!`);
+      setAppAlert(`${amount} coins successfully sent!`);
     } catch (e) {
       console.error("Coin send error:", e);
-      setAppAlert("Hata: Coin gönderilemedi. Lütfen kuralları güncellediğinizden emin olun.");
+      setAppAlert("Error: Could not send coins. Please make sure the Firestore rules are updated.");
     }
   };
 
   const fetchLeaderboard = async () => {
     try {
-      const q = query(collection(db, "users"), orderBy("coins", "desc"), limit(60));
+      const q = query(collection(db, "users"), orderBy("highScore", "desc"), limit(60));
       const snapshot = await getDocs(q);
       const players = snapshot.docs.map(doc => doc.data() as UserProfile);
       setTopPlayers(players.filter(p => !p.isAdmin).slice(0, 50));
@@ -256,12 +308,12 @@ export default function App() {
       
       const now = Date.now();
       const diff = now - lastTickRef.current;
-      const minutes5 = 5 * 60 * 1000;
+      const minutes1 = 1 * 60 * 1000;
       
-      if (diff >= minutes5) {
-          const ticks = Math.floor(diff / minutes5);
+      if (diff >= minutes1) {
+          const ticks = Math.floor(diff / minutes1);
           const newEnergy = Math.min(100, localEnergy + (ticks * 1));
-          const newLastTick = now - (diff % minutes5);
+          const newLastTick = now - (diff % minutes1);
           
           setLocalEnergy(newEnergy);
           lastTickRef.current = newLastTick;
@@ -271,7 +323,7 @@ export default function App() {
              lastEnergyUpdateTime: newLastTick 
           });
       } else {
-          setTimeUntilNext(Math.ceil((minutes5 - diff) / 1000));
+          setTimeUntilNext(Math.ceil((minutes1 - diff) / 1000));
       }
     }, 1000);
     return () => clearInterval(interval);
@@ -286,6 +338,9 @@ export default function App() {
           }
           await AdMob.initialize({});
           AdMob.addListener(RewardAdPluginEvents.Loaded, () => setIsAdLoaded(true));
+          AdMob.addListener(RewardAdPluginEvents.Rewarded, () => {
+             giveAdReward(pendingRewardTypeRef.current);
+          });
           AdMob.addListener(RewardAdPluginEvents.Dismissed, () => {
              setIsWatchingAd(false);
              loadAd();
@@ -294,7 +349,21 @@ export default function App() {
              setIsAdLoaded(false);
              setTimeout(loadAd, 30000);
           });
+          
+          AdMob.addListener(InterstitialAdPluginEvents.Loaded, () => {
+             isInterstitialLoadedRef.current = true;
+          });
+          AdMob.addListener(InterstitialAdPluginEvents.Dismissed, () => {
+             isInterstitialLoadedRef.current = false;
+             loadInterstitial();
+          });
+          AdMob.addListener(InterstitialAdPluginEvents.FailedToLoad, () => {
+             isInterstitialLoadedRef.current = false;
+             setTimeout(loadInterstitial, 30000);
+          });
+          
           loadAd();
+          loadInterstitial();
         } catch(e) { console.error(e); }
     };
     const loadAd = async () => {
@@ -304,6 +373,13 @@ export default function App() {
            adId = "ca-app-pub-5681334667848041/7280060533"; // iOS
        }
        await AdMob.prepareRewardVideoAd({ adId, isTesting: false }).catch(e => console.error(e));
+    };
+    const loadInterstitial = async () => {
+       let adId = "ca-app-pub-5681334667848041/1249496894"; // Android Interstitial
+       if (Capacitor.getPlatform() === 'ios') {
+           adId = "ca-app-pub-5681334667848041/7679173876"; // iOS Interstitial
+       }
+       await AdMob.prepareInterstitial({ adId, isTesting: false }).catch(e => console.error(e));
     };
     initAdMob();
   }, []);
@@ -315,7 +391,36 @@ export default function App() {
     if (!user) return; // Need login
     
     if (!isConnected || !socket?.connected) {
-        setAppAlert("Sunucuya bağlanılamadı. Lütfen internet bağlantınızı kontrol edip tekrar deneyin.");
+        setAppAlert("Could not connect to the server. Please check your internet connection and try again.");
+        return;
+    }
+
+    audioManager.init();
+    audioManager.resume();
+    
+    if (!userProfile?.isAdmin) {
+      if (localEnergy < 33) {
+          setAppAlert("Not enough energy! Wait a few minutes or watch an ad to get more.");
+          return;
+      }
+      const newEnergy = localEnergy - 33;
+      setLocalEnergy(newEnergy);
+      updateUserProfile(user.uid, { energy: newEnergy }).catch(e => console.log("Guest profile not saved:", e));
+    }
+    
+    setIsSearching(true);
+    
+    socket?.emit("findGame", { 
+        displayName: userProfile?.displayName || user?.displayName || "Guest", 
+        skin: userProfile?.equippedSkin || undefined 
+    });
+  };
+
+  const handleSinglePlayer = () => {
+    if (!user) return; // Need login
+    
+    if (!isConnected || !socket?.connected) {
+        setAppAlert("Could not connect to the server. Please check your internet connection and try again.");
         return;
     }
 
@@ -324,7 +429,7 @@ export default function App() {
     
     if (!userProfile?.isAdmin) {
       if (localEnergy < 10) {
-          setAppAlert("Yeterli enerjiniz yok! Biraz bekleyin veya reklam izleyin.");
+          setAppAlert("Not enough energy! Wait a few minutes or watch an ad to get more.");
           return;
       }
       const newEnergy = localEnergy - 10;
@@ -334,20 +439,22 @@ export default function App() {
     
     setIsSearching(true);
     
-    socket?.emit("findGame", { 
-        displayName: userProfile?.displayName || user?.displayName || "Misafir", 
+    socket?.emit("startSinglePlayer", { 
+        displayName: userProfile?.displayName || user?.displayName || "Guest", 
         skin: userProfile?.equippedSkin || undefined 
     });
   };
 
-  const handleWatchAd = async () => {
+  const handleWatchAd = async (rewardType: 'energy' | 'coins' = 'energy') => {
+    pendingRewardTypeRef.current = rewardType;
+    rewardGivenRef.current = false;
+    const rewardText = rewardType === 'energy' ? "+33 Energy" : "+50 Coins";
+
     if (!Capacitor.isNativePlatform()) {
        setIsWatchingAd(true);
        setTimeout(() => {
           setIsWatchingAd(false);
-          const newEnergy = Math.min(100, localEnergy + 25);
-          setLocalEnergy(newEnergy);
-          if (user) updateUserProfile(user.uid, { energy: newEnergy, lastEnergyUpdateTime: lastTickRef.current });
+          giveAdReward(rewardType);
        }, 3000);
        return;
     }
@@ -355,38 +462,19 @@ export default function App() {
     if (isAdLoaded) {
        setIsWatchingAd(true);
        try {
-           // 15 saniyelik zaman aşımı (AdMob donmalarını önlemek için)
-           const reward = await Promise.race([
-               AdMob.showRewardVideoAd(),
-               new Promise<any>((_, reject) => setTimeout(() => reject(new Error("Reklam yüklenmesi zaman aşımına uğradı.")), 15000))
-           ]);
-           if (reward) {
-               setLocalEnergy(e => {
-                   const newE = Math.min(100, e + 25);
-                   if (user) updateUserProfile(user.uid, { energy: newE, lastEnergyUpdateTime: lastTickRef.current }).catch(err => console.log(err));
-                   return newE;
-               });
-           }
+           await AdMob.showRewardVideoAd();
        } catch (e) {
            console.error("AdMob Error:", e);
-           setAppAlert("Cihazınızda reklam gösterilemedi (Emülatör hatası olabilir) ama test için +25 Enerji hesabınıza eklendi!");
-           
-           // Fallback for testing: give energy anyway
-           setLocalEnergy(e => {
-               const newE = Math.min(100, e + 25);
-               if (user) updateUserProfile(user.uid, { energy: newE, lastEnergyUpdateTime: lastTickRef.current }).catch(err => console.log(err));
-               return newE;
-           });
+           // Often closing ad throws an exception on Android, but we don't abort.
        } finally {
            setIsWatchingAd(false);
+           // Guarantee the reward is delivered
+           setTimeout(() => {
+               giveAdReward(pendingRewardTypeRef.current);
+           }, 500);
        }
     } else {
-       setAppAlert("Reklam henüz yüklenmedi (Emülatör) ama test için +25 Enerji verildi!");
-       setLocalEnergy(e => {
-           const newE = Math.min(100, e + 25);
-           if (user) updateUserProfile(user.uid, { energy: newE, lastEnergyUpdateTime: lastTickRef.current }).catch(err => console.log(err));
-           return newE;
-       });
+       setAppAlert(`Reklam henüz hazır değil. Lütfen birkaç saniye bekleyip tekrar dene.`);
     }
   };
 
@@ -402,14 +490,14 @@ export default function App() {
   const handleAcceptInvite = () => {
       if (invitation && socket) {
          if (!userProfile?.isAdmin) {
-           if (localEnergy < 10) return;
-           const newEnergy = localEnergy - 10;
+           if (localEnergy < 33) return;
+           const newEnergy = localEnergy - 33;
            setLocalEnergy(newEnergy);
            updateUserProfile(user.uid, { energy: newEnergy });
          }
 
         socket.emit("acceptInvite", invitation.roomId, {
-          displayName: userProfile?.displayName || user?.displayName || undefined,
+          displayName: userProfile?.displayName || user?.displayName || "Guest",
           skin: userProfile?.equippedSkin || undefined
         });
         setInvitation(null);
@@ -480,15 +568,23 @@ export default function App() {
           }
           if (!prevMeRef.current.finished && me.finished) {
             audioManager.playWin();
-            if (me.currentPlacement && userProfile) {
+            const currentProfile = userProfileRef.current;
+            if (me.currentPlacement && currentProfile) {
                 let coinsWon = 10;
                 if (me.currentPlacement === 1) coinsWon = 100;
                 else if (me.currentPlacement === 2) coinsWon = 50;
                 else if (me.currentPlacement === 3) coinsWon = 20;
                 
-                const newCoins = userProfile.coins + coinsWon;
-                setUserProfile({ ...userProfile, coins: newCoins });
-                updateUserProfile(userProfile.uid, { coins: newCoins });
+                const currentCoins = Number(currentProfile.coins) || 0;
+                const newCoins = currentCoins + coinsWon;
+                setUserProfile({ ...currentProfile, coins: newCoins });
+                updateUserProfile(currentProfile.uid, { coins: newCoins });
+                
+                setAppAlert(`Congratulations! You finished #${me.currentPlacement} and won ${coinsWon} Coins! 🏆`);
+                
+                if (Capacitor.isNativePlatform() && isInterstitialLoadedRef.current) {
+                    AdMob.showInterstitial().catch(e => console.error("Interstitial error:", e));
+                }
             }
           }
         }
@@ -818,13 +914,13 @@ export default function App() {
              <div className="w-16 h-16 bg-red-500/20 rounded-full flex items-center justify-center mb-4">
                 <span className="text-red-500 text-3xl">⚠️</span>
              </div>
-             <h3 className="text-xl font-black text-white uppercase tracking-widest mb-2">Uyarı</h3>
+             <h3 className="text-xl font-black text-white uppercase tracking-widest mb-2">Alert</h3>
              <p className="text-slate-300 font-mono text-sm mb-6">{appAlert}</p>
              <button 
                 onClick={() => setAppAlert(null)}
                 className="w-full bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded-xl transition-colors uppercase tracking-widest"
              >
-               Tamam
+               OK
              </button>
           </div>
         </div>
@@ -869,9 +965,9 @@ export default function App() {
                  ) : (
                     <div className="flex items-center gap-1 group">
                         <span className="text-xs font-bold font-mono text-slate-300 truncate max-w-[80px] inline-block">
-                           {(userProfile?.displayName || user.displayName || 'Misafir').split(' ')[0]}
+                           {(userProfile?.displayName || user.displayName || 'Guest').split(' ')[0]}
                         </span>
-                        <button onClick={() => { setNewNameInput(userProfile?.displayName || user.displayName || 'Misafir'); setIsEditingName(true); }} className="p-0.5 hover:text-white text-slate-400">
+                        <button onClick={() => { setNewNameInput(userProfile?.displayName || user.displayName || 'Guest'); setIsEditingName(true); }} className="p-0.5 hover:text-white text-slate-400">
                             <Edit2 className="w-3 h-3" />
                         </button>
                     </div>
@@ -887,7 +983,7 @@ export default function App() {
                          className="w-full flex items-center gap-2 px-4 py-3 text-sm text-slate-200 hover:bg-slate-700 transition-colors"
                        >
                          <LogOut className="w-4 h-4 text-red-400" />
-                         <span>Çıkış Yap</span>
+                         <span>Sign Out</span>
                        </button>
                        <div className="border-t border-slate-700" />
                        <button
@@ -895,7 +991,7 @@ export default function App() {
                          className="w-full flex items-center gap-2 px-4 py-3 text-sm text-red-400 hover:bg-red-900/40 transition-colors"
                        >
                          <Trash2 className="w-4 h-4 text-red-500" />
-                         <span>Hesabı Sil</span>
+                         <span>Delete Account</span>
                        </button>
                      </div>
                    )}
@@ -977,7 +1073,31 @@ export default function App() {
               {gameState.raceCount >= gameState.totalRaces ? `Tournament Complete!` : `Next Race in ${Math.ceil(gameState.countdown / 60)}s`}
             </div>
           )}
-          {gameState && gameState.status === 'finished' && (
+          {gameState && gameState.status === 'finished' && gameState.isSinglePlayer && (
+            <div className="fixed inset-0 w-full h-full bg-[#0F172A]/95 backdrop-blur-xl z-[100] flex items-center justify-center p-4 sm:p-8">
+              <div className="bg-[#1E293B] p-8 sm:p-12 rounded-3xl border-8 border-green-500 shadow-[0_0_100px_rgba(34,197,94,0.5)] max-w-4xl w-full max-h-full overflow-y-auto">
+                <h2 className="text-4xl sm:text-6xl font-black text-white text-center mb-8 sm:mb-12 uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-green-600 drop-shadow-2xl">
+                  Run Ended!
+                </h2>
+                <div className="space-y-6">
+                  {Object.values(gameState.players).map((p: any) => (
+                      <div key={p.id} className={`flex flex-col justify-center items-center p-6 rounded-2xl bg-[#0F172A] border-4 border-green-400 shadow-[0_0_20px_rgba(34,197,94,0.4)] gap-4`}>
+                         <span className="text-slate-400 font-bold uppercase tracking-widest text-xl">Distance Traveled</span>
+                         <span className="text-green-400 font-mono font-bold text-5xl">{p.score || 0}</span>
+                         <span className="text-yellow-400 font-mono font-bold text-2xl mt-4">Earned: +{Math.floor((p.score || 0) * 0.05)} Coins</span>
+                      </div>
+                  ))}
+                </div>
+                <button 
+                  onClick={() => window.location.reload()}
+                  className="w-full mt-12 bg-pink-600 hover:bg-pink-500 text-white font-black text-2xl sm:text-4xl py-6 rounded-2xl uppercase tracking-widest border-b-8 border-pink-800 active:border-b-0 active:translate-y-2 transition-all shadow-2xl"
+                >
+                  Return to Menu
+                </button>
+              </div>
+            </div>
+          )}
+          {gameState && gameState.status === 'finished' && !gameState.isSinglePlayer && (
             <div className="fixed inset-0 w-full h-full bg-[#0F172A]/95 backdrop-blur-xl z-[100] flex items-center justify-center p-4 sm:p-8">
               <div className="bg-[#1E293B] p-8 sm:p-12 rounded-3xl border-8 border-yellow-500 shadow-[0_0_100px_rgba(234,179,8,0.5)] max-w-4xl w-full max-h-full overflow-y-auto">
                 <h2 className="text-4xl sm:text-6xl font-black text-white text-center mb-8 sm:mb-12 uppercase tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 to-yellow-600 drop-shadow-2xl">
@@ -1047,21 +1167,21 @@ export default function App() {
                           className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl font-bold uppercase tracking-wider text-base sm:text-lg transition-all bg-white text-slate-800 border-b-4 border-r-4 border-slate-400 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:bg-gray-100 active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                         >
                           <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" className="w-6 h-6" alt="Google" />
-                          <span>Google ile Giriş</span>
+                          <span>Sign in with Google</span>
                         </button>
                         <button 
                           onClick={handleAppleLogin}
                           className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl font-bold uppercase tracking-wider text-base sm:text-lg transition-all bg-black text-white border-b-4 border-r-4 border-gray-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:bg-gray-900 active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                         >
                           <svg viewBox="0 0 384 512" className="w-6 h-6 fill-white"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.1-44.6-35.9-2.8-74.3 22.7-93.1 22.7-18.9 0-46.5-22.7-76.3-22.7-44.8 0-87.1 27.5-111.4 69.8-51.2 88.5-13.3 221.7 34.6 291 23.3 33.6 51 69.8 87.5 68.3 35.1-1.5 48.7-22.7 91.1-22.7 42.4 0 54.9 22.7 91.7 22.1 38.3-.6 62.4-33.1 84.8-67.6 26.2-39.7 37-78.1 37.6-80.1-1-1-72.2-27.1-72.4-111.3zM250.7 77.2c20.4-24.8 34.1-59.5 30.4-94.2-30.8 1.2-66.8 20.6-88.3 45.4-17.7 20.3-33.8 55.7-29.2 89.8 34.1 2.6 66.8-16.1 87.1-41z"/></svg>
-                          <span>Apple ile Giriş</span>
+                          <span>Sign in with Apple</span>
                         </button>
                         <button 
                           onClick={handleGuestLogin}
                           className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl font-bold uppercase tracking-wider text-base sm:text-lg transition-all bg-[#334155] text-white border-b-4 border-r-4 border-[#0F172A] shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:bg-[#475569] active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                         >
                           <LogIn className="w-6 h-6 text-white" />
-                          <span>Misafir Olarak Devam Et</span>
+                          <span>Continue as Guest</span>
                         </button>
                       </div>
                     ) : (
@@ -1071,11 +1191,18 @@ export default function App() {
                           className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl font-bold uppercase tracking-wider text-lg transition-all relative z-10 bg-yellow-500 text-[#0F172A] border-b-4 border-r-4 border-yellow-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:bg-yellow-400 active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
                         >
                           <Zap className="w-6 h-6 fill-[#0F172A]" />
-                          <span>Join Game</span>
+                          <span>Join Game (-33⚡)</span>
+                        </button>
+                        <button 
+                          onClick={handleSinglePlayer}
+                          className="mt-4 w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl font-bold uppercase tracking-wider text-lg transition-all relative z-10 bg-green-500 text-[#0F172A] border-b-4 border-r-4 border-green-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.5)] hover:bg-green-400 active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none"
+                        >
+                          <span className="text-2xl leading-none">🏃‍♂️</span>
+                          <span>Single Player (-10⚡)</span>
                         </button>
                         {localEnergy < 100 && (
                           <button 
-                            onClick={handleWatchAd}
+                            onClick={() => handleWatchAd('energy')}
                             disabled={isWatchingAd}
                             className={`mt-4 px-4 py-3 border-2 text-yellow-500 rounded-lg shadow-sm transition-all font-bold uppercase tracking-wider text-sm w-full relative z-10 flex items-center justify-center gap-2 ${
                               isWatchingAd ? "bg-slate-700 border-slate-600 cursor-not-allowed opacity-80" : "bg-[#0F172A] border-slate-600 hover:bg-slate-800 active:scale-95"
@@ -1086,9 +1213,23 @@ export default function App() {
                             ) : (
                               <Zap className="w-4 h-4 text-yellow-500" />
                             )}
-                            {isWatchingAd ? "Reklam İzleniyor..." : `Reklam İzle (+25 ⚡)`}
+                            {isWatchingAd ? "Loading Ad..." : `Watch Ad (+33 ⚡)`}
                           </button>
                         )}
+                        <button 
+                          onClick={() => handleWatchAd('coins')}
+                          disabled={isWatchingAd}
+                          className={`mt-4 px-4 py-3 border-2 text-yellow-400 rounded-lg shadow-sm transition-all font-bold uppercase tracking-wider text-sm w-full relative z-10 flex items-center justify-center gap-2 ${
+                            isWatchingAd ? "bg-slate-700 border-slate-600 cursor-not-allowed opacity-80" : "bg-yellow-900 border-yellow-600 hover:bg-yellow-800 active:scale-95"
+                          }`}
+                        >
+                          {isWatchingAd ? (
+                            <div className="w-4 h-4 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin"></div>
+                          ) : (
+                            <span className="text-xl leading-none">💰</span>
+                          )}
+                          {isWatchingAd ? "Loading Ad..." : `Watch Ad (+50 Coins)`}
+                        </button>
                       </>
                     )}
                   </>
@@ -1208,7 +1349,7 @@ export default function App() {
                      <button 
                          onClick={async () => {
                              if (!user || !friendCodeInput || friendCodeInput.length !== 6) return;
-                             setFriendMessage("Ekleniyor...");
+                             setFriendMessage("Adding...");
                              const res = await addFriendByCode(user.uid, friendCodeInput);
                              setFriendMessage(res.message);
                              if (res.success) {
@@ -1312,12 +1453,12 @@ export default function App() {
              <div className="flex justify-center items-center mb-8 border-b-2 border-slate-700 pb-4">
                  <h2 className="text-3xl font-black text-white uppercase tracking-widest flex items-center gap-3">
                     <Trophy className="w-8 h-8 text-yellow-500" />
-                    Top 50 Players
+                    Top 50 High Scores
                  </h2>
              </div>
              <div className="flex-grow space-y-3">
                {topPlayers.length === 0 ? (
-                 <div className="text-center text-slate-400 py-10 font-mono">Yükleniyor...</div>
+                 <div className="text-center text-slate-400 py-10 font-mono">Loading...</div>
                ) : (
                  topPlayers.map((p, index) => (
                    <div key={p.uid} className={`flex items-center justify-between p-4 rounded-xl bg-slate-800 border-2 ${index === 0 ? 'border-yellow-400' : index === 1 ? 'border-slate-300' : index === 2 ? 'border-amber-700' : 'border-slate-700'}`}>
@@ -1331,7 +1472,7 @@ export default function App() {
                        </span>
                      </div>
                      <span className="text-yellow-400 font-black font-mono tracking-wider flex items-center gap-1">
-                       {p.coins} <span className="text-sm">🪙</span>
+                       {p.highScore || 0} <span className="text-sm">⭐</span>
                      </span>
                    </div>
                  ))
@@ -1422,7 +1563,7 @@ export default function App() {
              </div>
              <div className="flex-grow space-y-3">
                {adminLoading ? (
-                 <div className="text-center text-slate-400 py-10 font-mono">Veriler Çekiliyor...</div>
+                 <div className="text-center text-slate-400 py-10 font-mono">Loading data...</div>
                ) : (
                  allUsers.map((p) => (
                    <div key={p.uid} className="flex flex-col sm:flex-row items-start sm:items-center justify-between p-4 rounded-xl bg-slate-800 border-2 border-slate-700 gap-4">
