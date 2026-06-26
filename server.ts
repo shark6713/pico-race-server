@@ -201,58 +201,61 @@ function checkCollision(r1: {x: number, y: number, width: number, height: number
   );
 }
 
-// Predictive AI Simulation
-function predictOutcome(player: Player, room: GameState, action: {left: boolean, right: boolean, jump: boolean}): number {
+type ActionStep = { left: boolean, right: boolean, jump: boolean, frames: number };
+
+// Predictive AI Simulation (Model Predictive Control)
+function predictOutcome(player: Player, room: GameState, sequence: ActionStep[]): number {
     let { x, y, vx, vy, isGrounded } = player;
     
-    // Simulate physics for 45 frames (0.75 seconds) to prevent over-predicting future deaths from constant input
-    for (let frame = 0; frame < 45; frame++) {
-        // Apply input
-        if (action.left) vx = -MOVE_SPEED;
-        else if (action.right) vx = MOVE_SPEED;
-        else vx *= FRICTION;
-        
-        // Jump only allowed on first frame if grounded
-        if (frame === 0 && action.jump && isGrounded) {
-            vy = JUMP_FORCE;
-            isGrounded = false;
-        }
-        
-        vy += GRAVITY;
-        x += vx;
-        
-        for (const block of room.blocks) {
-            if (checkCollision({ x, y, width: player.width, height: player.height }, block)) {
-                if (vx > 0) x = block.x - player.width;
-                else if (vx < 0) x = block.x + block.width;
-                vx = 0;
+    for (const step of sequence) {
+        for (let f = 0; f < step.frames; f++) {
+            // Apply input
+            if (step.left) vx = -MOVE_SPEED;
+            else if (step.right) vx = MOVE_SPEED;
+            else vx *= FRICTION;
+            
+            // Jump only allowed on first frame of a step if grounded
+            if (f === 0 && step.jump && isGrounded) {
+                vy = JUMP_FORCE;
+                isGrounded = false;
             }
-        }
-        
-        if (x < 0) { x = 0; vx = 0; }
-        if (x + player.width > room.mapWidth) { x = room.mapWidth - player.width; vx = 0; }
-        
-        y += vy;
-        isGrounded = false;
-        
-        for (const block of room.blocks) {
-            if (checkCollision({ x, y, width: player.width, height: player.height }, block)) {
-                if (vy > 0) {
-                    y = block.y - player.height;
-                    isGrounded = true;
-                } else if (vy < 0) {
-                    y = block.y + block.height;
+            
+            vy += GRAVITY;
+            x += vx;
+            
+            for (const block of room.blocks) {
+                if (checkCollision({ x, y, width: player.width, height: player.height }, block)) {
+                    if (vx > 0) x = block.x - player.width;
+                    else if (vx < 0) x = block.x + block.width;
+                    vx = 0;
                 }
-                vy = 0;
             }
+            
+            if (x < 0) { x = 0; vx = 0; }
+            if (x + player.width > room.mapWidth) { x = room.mapWidth - player.width; vx = 0; }
+            
+            y += vy;
+            isGrounded = false;
+            
+            for (const block of room.blocks) {
+                if (checkCollision({ x, y, width: player.width, height: player.height }, block)) {
+                    if (vy > 0) {
+                        y = block.y - player.height;
+                        isGrounded = true;
+                    } else if (vy < 0) {
+                        y = block.y + block.height;
+                    }
+                    vy = 0;
+                }
+            }
+            
+            if (y > room.mapHeight + 100) return -9999; // Death penalty
         }
-        
-        if (y > room.mapHeight + 100) return -9999; // Death penalty
     }
     
-    // Penalize slightly for choosing to move left if it's not strictly necessary to survive
     let score = x;
-    if (action.left) score -= 100;
+    // Small incentive to climb higher
+    score -= (y * 0.1);
     
     // Apply stuck penalty only if it ends the simulation stuck
     if (vx === 0) score -= 500; 
@@ -321,31 +324,30 @@ setInterval(() => {
         // Bot logic
         if (player.isBot) {
            if (player.isGrounded) {
-               // PREDICTIVE AI: Evaluate basic actions in order of priority
-               const actions = [
-                   { right: true, left: false, jump: false },   // Default: Run right
-                   { right: true, left: false, jump: true },    // Jump right
-                   { right: false, left: false, jump: false },  // Idle
-                   { right: false, left: true, jump: false },   // Back up
-                   { right: false, left: true, jump: true }     // Jump left
+               // PREDICTIVE AI: Evaluate sequences of actions (MPC)
+               const sequences = [
+                   [{ right: true, left: false, jump: false, frames: 45 }], // 0: Run right
+                   [{ right: true, left: false, jump: true, frames: 45 }],  // 1: Jump right
+                   [{ right: false, left: false, jump: true, frames: 15 }, { right: true, left: false, jump: false, frames: 30 }], // 2: Jump straight, then right
+                   [{ right: false, left: true, jump: true, frames: 15 }, { right: true, left: false, jump: false, frames: 30 }], // 3: Jump left, then right
+                   [{ right: false, left: false, jump: false, frames: 45 }], // 4: Idle
+                   [{ right: false, left: true, jump: false, frames: 45 }], // 5: Back up
+                   [{ right: false, left: true, jump: false, frames: 15 }, { right: true, left: false, jump: true, frames: 30 }] // 6: Back up then running jump
                ];
                
                let bestScore = -Infinity;
-               let bestAction = actions[0];
+               let bestSequenceIndex = 0;
                
-               for (const action of actions) {
-                   const score = predictOutcome(player, room, action);
-                   // ONLY switch if the score is strictly greater (prevents jittering between equal choices)
+               for (let i = 0; i < sequences.length; i++) {
+                   const score = predictOutcome(player, room, sequences[i]);
                    if (score > bestScore) {
                        bestScore = score;
-                       bestAction = action;
+                       bestSequenceIndex = i;
                    }
                }
                
-               if (player.displayName === "Bot 1" || player.id.startsWith("bot_")) {
-                   // console.log(\`Bot \${player.displayName} at x:\${player.x.toFixed(1)} bestAction:\`, bestAction, \`score:\${bestScore}\`);
-               }
-               
+               // Apply only the FIRST frame of the FIRST step of the best sequence
+               const bestAction = sequences[bestSequenceIndex][0];
                player.input.left = bestAction.left;
                player.input.right = bestAction.right;
                player.input.jump = bestAction.jump;
@@ -353,16 +355,16 @@ setInterval(() => {
                // 5% chance to make a mistake
                if (Math.random() < 0.05) {
                    if (Math.random() < 0.5) {
-                       player.input.jump = !player.input.jump; // accidentally jump or forget to jump
+                       player.input.jump = !player.input.jump;
                    } else {
-                       player.input.right = false; // accidentally let go of forward
+                       player.input.right = false;
                    }
                }
            } else {
                // Mid-air logic
-               const scoreRight = predictOutcome(player, room, { right: true, left: false, jump: false });
-               const scoreLeft = predictOutcome(player, room, { right: false, left: true, jump: false });
-               const scoreIdle = predictOutcome(player, room, { right: false, left: false, jump: false });
+               const scoreRight = predictOutcome(player, room, [{ right: true, left: false, jump: false, frames: 45 }]);
+               const scoreLeft = predictOutcome(player, room, [{ right: false, left: true, jump: false, frames: 45 }]);
+               const scoreIdle = predictOutcome(player, room, [{ right: false, left: false, jump: false, frames: 45 }]);
                
                // Require a significant advantage to change momentum mid-air
                if (scoreLeft > scoreRight + 50 && scoreLeft > scoreIdle) {
