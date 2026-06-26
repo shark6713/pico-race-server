@@ -205,8 +205,8 @@ function checkCollision(r1: {x: number, y: number, width: number, height: number
 function predictOutcome(player: Player, room: GameState, action: {left: boolean, right: boolean, jump: boolean}): number {
     let { x, y, vx, vy, isGrounded } = player;
     
-    // Simulate physics for 60 frames (1 second) to see wider gaps
-    for (let frame = 0; frame < 60; frame++) {
+    // Simulate physics for 90 frames (1.5 seconds) to see wider gaps
+    for (let frame = 0; frame < 90; frame++) {
         // Apply input
         if (action.left) vx = -MOVE_SPEED;
         else if (action.right) vx = MOVE_SPEED;
@@ -344,9 +344,13 @@ setInterval(() => {
                player.input.right = bestAction.right;
                player.input.jump = bestAction.jump;
                
-               // 1% chance to randomly jump just to look a bit derpy
-               if (Math.random() < 0.01) {
-                   player.input.jump = true;
+               // 5% chance to make a mistake
+               if (Math.random() < 0.05) {
+                   if (Math.random() < 0.5) {
+                       player.input.jump = !player.input.jump; // accidentally jump or forget to jump
+                   } else {
+                       player.input.right = false; // accidentally let go of forward
+                   }
                }
            } else {
                // Mid-air logic
