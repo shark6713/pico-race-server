@@ -248,12 +248,14 @@ function predictOutcome(player: Player, room: GameState, action: {left: boolean,
         }
         
         if (y > room.mapHeight + 100) return -9999; // Death penalty
-        if (vx === 0) return x - 500; // Stuck penalty
     }
     
     // Penalize slightly for choosing to move left if it's not strictly necessary to survive
     let score = x;
     if (action.left) score -= 100;
+    
+    // Apply stuck penalty only if it ends the simulation stuck
+    if (vx === 0) score -= 500; 
     
     return score;
 }
@@ -338,6 +340,10 @@ setInterval(() => {
                        bestScore = score;
                        bestAction = action;
                    }
+               }
+               
+               if (player.displayName === "Bot 1" || player.id.startsWith("bot_")) {
+                   // console.log(\`Bot \${player.displayName} at x:\${player.x.toFixed(1)} bestAction:\`, bestAction, \`score:\${bestScore}\`);
                }
                
                player.input.left = bestAction.left;
