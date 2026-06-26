@@ -319,13 +319,13 @@ setInterval(() => {
         // Bot logic
         if (player.isBot) {
            if (player.isGrounded) {
-               // PREDICTIVE AI: Evaluate basic actions
+               // PREDICTIVE AI: Evaluate basic actions in order of priority
                const actions = [
-                   { right: true, left: false, jump: false },
-                   { right: true, left: false, jump: true },
-                   { right: false, left: true, jump: false },
-                   { right: false, left: true, jump: true },
-                   { right: false, left: false, jump: false }
+                   { right: true, left: false, jump: false },   // Default: Run right
+                   { right: true, left: false, jump: true },    // Jump right
+                   { right: false, left: false, jump: false },  // Idle
+                   { right: false, left: true, jump: false },   // Back up
+                   { right: false, left: true, jump: true }     // Jump left
                ];
                
                let bestScore = -Infinity;
@@ -333,24 +333,20 @@ setInterval(() => {
                
                for (const action of actions) {
                    const score = predictOutcome(player, room, action);
-                   // Add slight noise to score to avoid perfectly robotic behavior
-                   const noisyScore = score + (Math.random() * 20 - 10);
-                   if (noisyScore > bestScore) {
-                       bestScore = noisyScore;
+                   // ONLY switch if the score is strictly greater (prevents jittering between equal choices)
+                   if (score > bestScore) {
+                       bestScore = score;
                        bestAction = action;
                    }
                }
                
-               // Apply best action
-               // To avoid bots being TOO perfect, occasionally ignore logic and do a random jump
-               if (Math.random() < 0.02) {
+               player.input.left = bestAction.left;
+               player.input.right = bestAction.right;
+               player.input.jump = bestAction.jump;
+               
+               // 1% chance to randomly jump just to look a bit derpy
+               if (Math.random() < 0.01) {
                    player.input.jump = true;
-                   player.input.right = true;
-                   player.input.left = false;
-               } else {
-                   player.input.left = bestAction.left;
-                   player.input.right = bestAction.right;
-                   player.input.jump = bestAction.jump;
                }
            } else {
                // Mid-air logic
@@ -358,10 +354,11 @@ setInterval(() => {
                const scoreLeft = predictOutcome(player, room, { right: false, left: true, jump: false });
                const scoreIdle = predictOutcome(player, room, { right: false, left: false, jump: false });
                
-               if (scoreLeft > scoreRight + 20 && scoreLeft > scoreIdle) {
+               // Require a significant advantage to change momentum mid-air
+               if (scoreLeft > scoreRight + 50 && scoreLeft > scoreIdle) {
                    player.input.left = true;
                    player.input.right = false;
-               } else if (scoreIdle > scoreRight + 20) {
+               } else if (scoreIdle > scoreRight + 50) {
                    player.input.left = false;
                    player.input.right = false;
                } else {
