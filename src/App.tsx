@@ -283,7 +283,7 @@ export default function App() {
 
   const fetchLeaderboard = async () => {
     try {
-      const q = query(collection(db, "users"), orderBy("highScore", "desc"), limit(60));
+      const q = query(collection(db, "users"), orderBy("coins", "desc"), limit(60));
       const snapshot = await getDocs(q);
       const players = snapshot.docs.map(doc => doc.data() as UserProfile);
       setTopPlayers(players.filter(p => !p.isAdmin).slice(0, 50));
@@ -1621,6 +1621,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
