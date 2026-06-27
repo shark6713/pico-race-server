@@ -203,6 +203,7 @@ export default function App() {
   const pendingRewardTypeRef = useRef<'energy' | 'coins'>('energy');
   const rewardGivenRef = useRef(false);
   const singlePlayerRewardGivenRef = useRef(false);
+  const isLeavingRef = useRef(false);
 
   useEffect(() => {
     if (gameState?.status === 'finished' && gameState.isSinglePlayer) {
@@ -494,8 +495,10 @@ export default function App() {
   };
 
   const handleLeaveGame = () => {
+    isLeavingRef.current = true;
     socket?.emit("leaveGame");
     setGameState(null);
+    setTimeout(() => { isLeavingRef.current = false; }, 2000);
   };
 
   const handleInvite = (targetSocketId: string) => {
@@ -571,6 +574,7 @@ export default function App() {
     });
 
     newSocket.on("stateUpdate", (state: GameState) => {
+      if (isLeavingRef.current) return;
       setGameState(state);
       setIsSearching(false);
       
@@ -1617,6 +1621,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 
