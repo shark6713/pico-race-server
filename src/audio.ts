@@ -3,13 +3,21 @@ class AudioManager {
   private isInitialized = false;
   public isMuted = false;
 
-  private bgmInterval: number | null = null;
-  private bgmOscs: OscillatorNode[] = [];
-  private bgmGain: GainNode | null = null;
+  private menuAudio: HTMLAudioElement | null = null;
+  private gameAudio: HTMLAudioElement | null = null;
+  public isInGame = false;
   private wasPlayingBeforeHide = false;
 
   constructor() {
     this.isMuted = localStorage.getItem("picoMuted") === "true";
+    if (typeof window !== "undefined") {
+        this.menuAudio = new Audio('/music/menu.mp3');
+        this.menuAudio.loop = true;
+        this.menuAudio.volume = 0.5;
+        this.gameAudio = new Audio('/music/in-game.mp3');
+        this.gameAudio.loop = true;
+        this.gameAudio.volume = 0.5;
+    }
     this.setupVisibilityListener();
   }
 
@@ -17,12 +25,9 @@ class AudioManager {
     if (typeof window !== "undefined" && typeof document !== "undefined") {
       document.addEventListener("visibilitychange", () => {
         if (document.hidden) {
-          if (this.bgmInterval) {
-            this.wasPlayingBeforeHide = true;
-            this.stopBGM();
-          } else {
-            this.wasPlayingBeforeHide = false;
-          }
+          // Pause currently playing music without changing state
+          this.menuAudio?.pause();
+          this.gameAudio?.pause();
           if (this.ctx && this.ctx.state === 'running') {
             this.ctx.suspend();
           }
@@ -30,11 +35,17 @@ class AudioManager {
           if (this.ctx && this.ctx.state === 'suspended') {
             this.ctx.resume();
           }
-          if (this.wasPlayingBeforeHide && !this.isMuted) {
+          if (!this.isMuted) {
             this.playBGM();
           }
         }
       });
+      // Handle autoplay block by starting music on first interaction
+      document.addEventListener("click", () => {
+          if (!this.isMuted && this.isInitialized) {
+              this.playBGM();
+          }
+      }, { once: true });
     }
   }
 
@@ -69,54 +80,32 @@ class AudioManager {
       this.ctx.resume();
     }
   }
+  
+  setGameState(inGame: boolean) {
+      this.isInGame = inGame;
+      if (this.isInitialized && !this.isMuted) {
+          this.playBGM();
+      } else if (this.isInitialized && this.isMuted) {
+          this.stopBGM(); // ensure correct track is ready but paused
+      }
+  }
 
   playBGM() {
-    if (!this.ctx || this.isMuted || this.bgmInterval) return;
+    if (this.isMuted) return;
     
-    this.bgmGain = this.ctx.createGain();
-    this.bgmGain.gain.value = 0.05; // low volume
-    this.bgmGain.connect(this.ctx.destination);
-    
-    // Simple retro C major arpeggio
-    const notes = [261.63, 329.63, 392.00, 523.25, 392.00, 329.63];
-    let step = 0;
-    
-    const playNote = () => {
-        if (!this.ctx || !this.bgmGain) return;
-        const osc = this.ctx.createOscillator();
-        osc.type = 'square';
-        osc.frequency.value = notes[step % notes.length];
-        osc.connect(this.bgmGain);
-        
-        const now = this.ctx.currentTime;
-        osc.start(now);
-        osc.stop(now + 0.15); // short note
-        
-        this.bgmOscs.push(osc);
-        // cleanup old oscs
-        if (this.bgmOscs.length > 10) {
-            this.bgmOscs.shift();
-        }
-        step++;
-    };
-    
-    playNote();
-    this.bgmInterval = window.setInterval(playNote, 250);
+    if (this.isInGame) {
+        this.menuAudio?.pause();
+        this.gameAudio?.play().catch(e => console.log("Autoplay blocked", e));
+    } else {
+        this.gameAudio?.pause();
+        if (this.gameAudio) this.gameAudio.currentTime = 0; // restart game music when leaving game
+        this.menuAudio?.play().catch(e => console.log("Autoplay blocked", e));
+    }
   }
 
   stopBGM() {
-    if (this.bgmInterval) {
-        clearInterval(this.bgmInterval);
-        this.bgmInterval = null;
-    }
-    this.bgmOscs.forEach(o => {
-        try { o.stop(); } catch(e){}
-    });
-    this.bgmOscs = [];
-    if (this.bgmGain) {
-        this.bgmGain.disconnect();
-        this.bgmGain = null;
-    }
+    this.menuAudio?.pause();
+    this.gameAudio?.pause();
   }
 
   playJump() {

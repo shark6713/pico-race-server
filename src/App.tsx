@@ -9,7 +9,7 @@ import { UserProfile, STORE_ITEMS } from "./shared/types";
 import { signInWithPopup, User, onAuthStateChanged, signOut, signInAnonymously, signInWithCredential, GoogleAuthProvider, OAuthProvider, deleteUser } from "firebase/auth";
 import { Capacitor } from '@capacitor/core';
 import { FirebaseAuthentication } from '@capacitor-firebase/authentication';
-import { AdMob, RewardAdOptions, AdLoadInfo, RewardAdPluginEvents, InterstitialAdPluginEvents } from '@capacitor-community/admob';
+import { AdMob, RewardAdOptions, AdLoadInfo, RewardAdPluginEvents, InterstitialAdPluginEvents, MaxAdContentRating } from '@capacitor-community/admob';
 
 export default function App() {
   const [appAlert, setAppAlert] = useState<string | null>(null);
@@ -330,13 +330,18 @@ export default function App() {
   }, [localEnergy, user]);
 
   useEffect(() => {
-    if (!Capacitor.isNativePlatform()) return;
     const initAdMob = async () => {
-        try {
+       if (Capacitor.isNativePlatform()) {
+         try {
           if (Capacitor.getPlatform() === 'ios') {
              await AdMob.requestTrackingAuthorization();
           }
-          await AdMob.initialize({});
+          await AdMob.initialize({
+            tagForChildDirectedTreatment: true,
+            tagForUnderAgeOfConsent: true,
+            maxAdContentRating: MaxAdContentRating.General
+          });
+          
           AdMob.addListener(RewardAdPluginEvents.Loaded, () => setIsAdLoaded(true));
           AdMob.addListener(RewardAdPluginEvents.Rewarded, () => {
              giveAdReward(pendingRewardTypeRef.current);
@@ -365,6 +370,7 @@ export default function App() {
           loadAd();
           loadInterstitial();
         } catch(e) { console.error(e); }
+      }
     };
     const loadAd = async () => {
        const platform = Capacitor.getPlatform();
@@ -386,6 +392,10 @@ export default function App() {
 
 
   const isInGame = gameState?.players[myId] !== undefined;
+
+  useEffect(() => {
+    audioManager.setGameState(isInGame);
+  }, [isInGame]);
 
   const handleJoinGame = () => {
     if (!user) return; // Need login
