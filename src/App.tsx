@@ -1076,7 +1076,7 @@ export default function App() {
                   ))}
                 </div>
                 <button 
-                  onClick={() => window.location.reload()}
+                  onClick={handleLeaveGame}
                   className="w-full mt-12 bg-pink-600 hover:bg-pink-500 text-white font-black text-2xl sm:text-4xl py-6 rounded-2xl uppercase tracking-widest border-b-8 border-pink-800 active:border-b-0 active:translate-y-2 transition-all shadow-2xl"
                 >
                   Return to Menu
@@ -1109,7 +1109,7 @@ export default function App() {
                   ))}
                 </div>
                 <button 
-                  onClick={() => window.location.reload()}
+                  onClick={handleLeaveGame}
                   className="w-full mt-12 bg-pink-600 hover:bg-pink-500 text-white font-black text-2xl sm:text-4xl py-6 rounded-2xl uppercase tracking-widest border-b-8 border-pink-800 active:border-b-0 active:translate-y-2 transition-all shadow-2xl"
                 >
                   Play Again
@@ -1610,4 +1610,5 @@ export default function App() {
     </div>
   );
 }
+
 
