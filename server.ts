@@ -209,6 +209,9 @@ type ActionStep = { left: boolean, right: boolean, jump: boolean, frames: number
 function predictOutcome(player: Player, room: GameState, sequence: ActionStep[]): number {
     let { x, y, vx, vy, isGrounded } = player;
     
+    // Performance optimization: only check blocks near the bot
+    const nearbyBlocks = room.blocks.filter(b => Math.abs(b.x - x) < 800);
+
     for (const step of sequence) {
         for (let f = 0; f < step.frames; f++) {
             // Apply input
@@ -225,7 +228,7 @@ function predictOutcome(player: Player, room: GameState, sequence: ActionStep[])
             vy += GRAVITY;
             x += vx;
             
-            for (const block of room.blocks) {
+            for (const block of nearbyBlocks) {
                 if (checkCollision({ x, y, width: player.width, height: player.height }, block)) {
                     if (vx > 0) x = block.x - player.width;
                     else if (vx < 0) x = block.x + block.width;
@@ -239,7 +242,7 @@ function predictOutcome(player: Player, room: GameState, sequence: ActionStep[])
             y += vy;
             isGrounded = false;
             
-            for (const block of room.blocks) {
+            for (const block of nearbyBlocks) {
                 if (checkCollision({ x, y, width: player.width, height: player.height }, block)) {
                     if (vy > 0) {
                         y = block.y - player.height;
