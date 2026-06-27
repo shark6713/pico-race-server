@@ -302,6 +302,7 @@ export default function App() {
     if (!user) return;
     const interval = setInterval(() => {
       if (localEnergy >= 100) {
+         lastTickRef.current = Date.now();
          setTimeUntilNext(null);
          return;
       }
@@ -413,9 +414,11 @@ export default function App() {
           setAppAlert("Not enough energy! Wait a few minutes or watch an ad to get more.");
           return;
       }
+      const wasFull = localEnergy >= 100;
       const newEnergy = localEnergy - 33;
       setLocalEnergy(newEnergy);
-      updateUserProfile(user.uid, { energy: newEnergy }).catch(e => console.log("Guest profile not saved:", e));
+      if (wasFull) lastTickRef.current = Date.now();
+      updateUserProfile(user.uid, { energy: newEnergy, ...(wasFull && { lastEnergyUpdateTime: Date.now() }) }).catch(e => console.log("Guest profile not saved:", e));
     }
     
     setIsSearching(true);
@@ -442,9 +445,11 @@ export default function App() {
           setAppAlert("Not enough energy! Wait a few minutes or watch an ad to get more.");
           return;
       }
+      const wasFull = localEnergy >= 100;
       const newEnergy = localEnergy - 10;
       setLocalEnergy(newEnergy);
-      updateUserProfile(user.uid, { energy: newEnergy }).catch(e => console.log("Guest profile not saved:", e));
+      if (wasFull) lastTickRef.current = Date.now();
+      updateUserProfile(user.uid, { energy: newEnergy, ...(wasFull && { lastEnergyUpdateTime: Date.now() }) }).catch(e => console.log("Guest profile not saved:", e));
     }
     
     setIsSearching(true);
@@ -501,9 +506,11 @@ export default function App() {
       if (invitation && socket) {
          if (!userProfile?.isAdmin) {
            if (localEnergy < 33) return;
+           const wasFull = localEnergy >= 100;
            const newEnergy = localEnergy - 33;
            setLocalEnergy(newEnergy);
-           updateUserProfile(user.uid, { energy: newEnergy });
+           if (wasFull) lastTickRef.current = Date.now();
+           updateUserProfile(user.uid, { energy: newEnergy, ...(wasFull && { lastEnergyUpdateTime: Date.now() }) });
          }
 
         socket.emit("acceptInvite", invitation.roomId, {
@@ -1610,5 +1617,7 @@ export default function App() {
     </div>
   );
 }
+
+
 
 
