@@ -575,7 +575,12 @@ export default function App() {
 
     newSocket.on("stateUpdate", (state: GameState) => {
       if (isLeavingRef.current) return;
-      setGameState(state);
+      setGameState(prevState => {
+          if (prevState && (!state.blocks || state.blocks.length === 0)) {
+              return { ...state, blocks: prevState.blocks, finishLine: prevState.finishLine };
+          }
+          return state;
+      });
       setIsSearching(false);
       
       if (newSocket.id) {
@@ -1621,6 +1626,7 @@ export default function App() {
     </div>
   );
 }
+
 
 
 

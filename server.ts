@@ -186,6 +186,8 @@ function nextLevel(room: GameState) {
       p.finished = false;
       p.currentPlacement = null;
     });
+    
+    io.to(room.id).emit("stateUpdate", room);
 }
 
 const colors = ["#ef4444", "#3b82f6", "#10b981", "#f59e0b", "#6366f1", "#ec4899"];
@@ -529,6 +531,7 @@ setInterval(() => {
               }
               room.mapWidth += randomLevel.width;
               room.mapHeight = Math.max(room.mapHeight, randomLevel.height);
+              io.to(room.id).emit("stateUpdate", room);
           }
       }
 
@@ -553,7 +556,8 @@ setInterval(() => {
         }
     }
 
-    io.to(roomId).emit("stateUpdate", room);
+    const emitRoom = { ...room, blocks: [], finishLine: undefined };
+    io.to(roomId).emit("stateUpdate", emitRoom);
   }
 }, TICK_RATE);
 
@@ -598,6 +602,7 @@ io.on("connection", (socket) => {
         onlineUsers[socket.id].status = 'playing';
         broadcastOnlineUsers();
     }
+    socket.emit("stateUpdate", room);
   };
 
   socket.on("findGame", (data: { displayName?: string; skin?: string } = {}) => {
@@ -749,3 +754,4 @@ async function startServer() {
 }
 
 startServer();
+
