@@ -1275,39 +1275,30 @@ export default function App() {
           <div className="2xl:hidden mt-2 flex justify-between gap-2 select-none touch-none z-20 relative w-full mb-1 px-2">
               <div className="flex gap-4">
                   <button
-                      onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('left'); }}
-                      onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
-                      onTouchCancel={(e) => { e.preventDefault(); handleMobileInputEnd('left'); }}
-                      onPointerDown={(e) => { handleMobileInputStart('left'); }}
+                                            onPointerDown={(e) => { handleMobileInputStart('left'); }}
                       onPointerUp={(e) => { handleMobileInputEnd('left'); }}
                       onPointerOut={(e) => { handleMobileInputEnd('left'); }}
                       onContextMenu={(e) => e.preventDefault()}
-                      className="w-24 h-16 bg-slate-700 border-b-4 border-r-4 border-slate-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-2xl uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-manipulation focus:outline-none"
+                      className="w-24 h-16 bg-slate-700 border-b-4 border-r-4 border-slate-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-2xl uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-none focus:outline-none"
                   >
                     ←
                   </button>
                   <button
-                      onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('right'); }}
-                      onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
-                      onTouchCancel={(e) => { e.preventDefault(); handleMobileInputEnd('right'); }}
-                      onPointerDown={(e) => { handleMobileInputStart('right'); }}
+                                            onPointerDown={(e) => { handleMobileInputStart('right'); }}
                       onPointerUp={(e) => { handleMobileInputEnd('right'); }}
                       onPointerOut={(e) => { handleMobileInputEnd('right'); }}
                       onContextMenu={(e) => e.preventDefault()}
-                      className="w-24 h-16 bg-slate-700 border-b-4 border-r-4 border-slate-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-2xl uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-manipulation focus:outline-none"
+                      className="w-24 h-16 bg-slate-700 border-b-4 border-r-4 border-slate-900 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-2xl uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-none focus:outline-none"
                   >
                     →
                   </button>
               </div>
               <button
-                  onTouchStart={(e) => { e.preventDefault(); handleMobileInputStart('jump'); }}
-                  onTouchEnd={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
-                  onTouchCancel={(e) => { e.preventDefault(); handleMobileInputEnd('jump'); }}
-                  onPointerDown={(e) => { handleMobileInputStart('jump'); }}
+                                    onPointerDown={(e) => { handleMobileInputStart('jump'); }}
                   onPointerUp={(e) => { handleMobileInputEnd('jump'); }}
                   onPointerOut={(e) => { handleMobileInputEnd('jump'); }}
                   onContextMenu={(e) => e.preventDefault()}
-                  className="w-28 h-16 bg-pink-500 border-b-4 border-r-4 border-pink-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-xl uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-manipulation focus:outline-none"
+                  className="w-28 h-16 bg-pink-500 border-b-4 border-r-4 border-pink-700 shadow-[2px_2px_0px_0px_rgba(0,0,0,0.3)] rounded-xl text-white font-bold text-xl uppercase tracking-wider active:border-b-0 active:border-r-0 active:translate-x-[4px] active:translate-y-[4px] active:shadow-none touch-none focus:outline-none"
               >
                 JUMP
               </button>
@@ -1619,3 +1610,4 @@ export default function App() {
     </div>
   );
 }
+

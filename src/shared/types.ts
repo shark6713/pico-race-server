@@ -22,6 +22,7 @@ export interface Player {
   input: PlayerInput;
   finished: boolean;
   isBot?: boolean;
+  jumpBuffered?: boolean;
   displayName?: string;
   skin?: string;
   placements: number[];

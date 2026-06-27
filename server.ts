@@ -425,10 +425,11 @@ setInterval(() => {
         }
 
         // Input jump
-        if (player.input.jump && player.isGrounded) {
+        if ((player.input.jump || player.jumpBuffered) && player.isGrounded) {
           player.vy = JUMP_FORCE;
           player.isGrounded = false;
         }
+        player.jumpBuffered = false; // Always consume buffer each physics frame
       } else {
         player.vx *= FRICTION;
       }
@@ -672,7 +673,12 @@ io.on("connection", (socket) => {
   socket.on("input", (input) => {
     const roomId = playerRoomMap[socket.id];
     if (roomId && rooms[roomId] && rooms[roomId].players[socket.id]) {
-      rooms[roomId].players[socket.id].input = input;
+      const p = rooms[roomId].players[socket.id];
+      // Buffer jump if it was pressed, so fast taps aren't lost between ticks
+      if (!p.input.jump && input.jump) {
+          p.jumpBuffered = true;
+      }
+      p.input = input;
     }
   });
 
